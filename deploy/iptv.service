@@ -1,0 +1,31 @@
+[Unit]
+Description=IPTV Player (grandma TV)
+After=multi-user.target network-online.target iptv-ir.service
+Wants=network-online.target iptv-ir.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=simple
+User=iptv
+Group=iptv
+# Supplementary groups needed for DRM (video/render) and input (input)
+SupplementaryGroups=video render input audio tty
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+WorkingDirectory=/home/iptv/iptv-player
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=SDL_AUDIODRIVER=dummy
+Environment=PYGAME_HIDE_SUPPORT_PROMPT=1
+Environment=HOME=/home/iptv
+ExecStart=/usr/bin/python3 /home/iptv/iptv-player/iptv_tv.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

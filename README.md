@@ -1,0 +1,115 @@
+# IPTV Player for Raspberry Pi (Argon IR Remote)
+
+A dead-simple, full-screen IPTV player. It can be controlled by the
+**Argon IR Remote** (needs an IR receiver — see note below) **and** by a
+**web-based virtual remote** you open from any phone, tablet or laptop on
+the same network.
+
+## Web remote & settings (works with no extra hardware)
+
+Open a browser on any device on the same Wi-Fi/LAN and go to:
+
+> **http://192.168.0.168:8080**  (the Raspberry Pi's address)
+
+You get two tabs:
+
+- **Remote** — on-screen buttons: Power, Up, Down, Left, Right, OK,
+  Back, Home, Volume +/−, Mute. (Arrow keys / Enter / Backspace / H on a
+  physical keyboard work too.)
+- **Settings** — edit the whole configuration (channels, provider,
+  TV guide) right in the browser and press **Save & Apply**; the player
+  reloads automatically. Invalid YAML is rejected with an error and the
+  previous config is backed up to `config.yaml.bak`.
+
+> Note on the IR remote: the Raspberry Pi has **no built-in IR receiver**.
+> The Argon remote only works if an IR receiver is connected (the Argon
+> ONE case has one on GPIO23, already configured here, or add a cheap
+> TSOP38238/VS1838B module to GPIO23). Until then, use the web remote.
+
+## How to use the remote
+
+| Button        | What it does                                  |
+|---------------|-----------------------------------------------|
+| Arrows ↑ ↓ ← →| Move the selection                            |
+| OK            | Open a list / start a channel                 |
+| Back          | Go back one screen                            |
+| Home          | Return to the first screen (the list of lists)|
+| Up / Down (while watching) | Switch to previous / next channel|
+| Menu / Back (while watching) | Show the channel list again    |
+| Volume + / −  | Change the volume                             |
+
+## Screens
+
+1. **Choose a list** — big buttons (News, Sports, Test Channels, …)
+2. **Choose a channel** — the channels inside that list (shows "Now"
+   from the TV guide if EPG is configured)
+3. **Watching** — full-screen video
+
+## Changing channels / provider — edit ONE file
+
+Everything lives in **`/home/iptv/iptv-player/config.yaml`**.
+
+- To use a paid IPTV subscription: fill in the `provider:` section
+  (url + username + password) and set `enabled: true`.
+- To hand-pick channels: edit the `playlists:` section.
+- To add a TV guide: add XMLTV URLs under `epg: sources:`.
+
+After editing:
+
+```bash
+ssh pi 'sudo systemctl restart iptv'
+```
+
+The test channels shipped in the config are free, public, legal streams
+(Al Jazeera, France 24, DW, Red Bull TV, NASA, plus Apple/Mux test feeds).
+
+## What was installed on the Pi
+
+- **IR receiver**: `dtoverlay=gpio-ir,gpio_pin=23` in
+  `/boot/firmware/config.txt` (Argon ONE IR is on GPIO 23).
+- **ir-keytable** + keymap `/etc/rc_keymaps/argon.toml` (NEC protocol),
+  auto-loaded by the `iptv-ir.service`.
+- **mpv** (hardware-accelerated player, renders on DRM/KMS — no desktop
+  needed), **python3-pygame** (menus), **python3-evdev** (reads the
+  remote), **python3-yaml**, **python3-requests**.
+
+## Services
+
+| Service            | Purpose                                            |
+|--------------------|----------------------------------------------------|
+| `iptv-ir.service`  | Loads the Argon remote keymap at boot              |
+| `iptv.service`     | Runs the player full-screen on tty1, restarts on crash |
+
+```bash
+ssh pi 'systemctl status iptv iptv-ir'
+ssh pi 'journalctl -u iptv -f'      # watch the player logs
+```
+
+The player waits until an HDMI TV/monitor is actually connected before
+drawing, so it is safe to leave running with the TV off.
+
+## Adding extra remote buttons (colour/number keys)
+
+Those aren't documented by Argon, so capture them yourself:
+
+```bash
+ssh pi 'sudo ir-keytable -s rc0 -t'   # press buttons, note "scancode = 0x.."
+```
+
+Add lines to `/etc/rc_keymaps/argon.toml`, e.g. `0x1a = "KEY_1"`, then:
+
+```bash
+ssh pi 'sudo systemctl restart iptv-ir'
+```
+
+## Files
+
+```
+app/config.yaml     the configuration you edit
+app/iptv_tv.py      main application (menus + main loop)
+app/iptv_config.py  config + Xtream provider + EPG (XMLTV) loading
+app/iptv_player.py  controls mpv over its IPC socket
+app/iptv_input.py   reads the IR remote (and HDMI-CEC / keyboard)
+deploy/*.service    systemd units
+deploy/capture-buttons.sh  helper to learn new remote buttons
+```

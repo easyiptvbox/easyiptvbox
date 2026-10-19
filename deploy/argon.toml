@@ -1,0 +1,18 @@
+# IPTV Player IR keymap - managed by the app (learned remotes).
+
+[[protocols]]
+name = "Argon Remote"
+protocol = "nec"
+variant = "nec"
+[protocols.scancodes]
+0x00ca = "KEY_UP"
+0x00d2 = "KEY_DOWN"
+0x0099 = "KEY_LEFT"
+0x00c1 = "KEY_RIGHT"
+0x00ce = "KEY_OK"
+0x0090 = "KEY_BACK"
+0x00cb = "KEY_HOME"
+0x009d = "KEY_MENU"
+0x0080 = "KEY_VOLUMEUP"
+0x0081 = "KEY_VOLUMEDOWN"
+0x009c = "KEY_POWER"

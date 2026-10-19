@@ -1,0 +1,15 @@
+[Unit]
+Description=Load IR remote keymap
+After=multi-user.target
+
+[Service]
+Type=oneshot
+# Load the kernel keymap if it contains any remote. Learned remotes are decoded
+# by the app itself (remotes.json), so the keymap may legitimately be empty -
+# then just clear the table and keep the NEC decoder on.
+ExecStart=/bin/sh -c 'if grep -q "^\[\[protocols\]\]" /etc/rc_keymaps/argon.toml 2>/dev/null; then /usr/bin/ir-keytable -c -w /etc/rc_keymaps/argon.toml; else /usr/bin/ir-keytable -c; fi'
+ExecStartPost=/usr/bin/ir-keytable -p nec
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

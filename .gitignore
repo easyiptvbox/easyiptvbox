@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# SSHFS mount point of the Pi (never commit)
+mnt/
+
+# Runtime data created on the device (may contain personal data / credentials)
+app/cache/
+app/remotes.json
+app/*.tmp
+app/config.yaml.bak
+backup-relocation/

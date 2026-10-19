@@ -1,0 +1,118 @@
+# =====================================================================
+#  IPTV Player configuration
+# =====================================================================
+#
+#  This is the ONLY file you normally need to edit.
+#
+#  There are two ways to add channels:
+#
+#    1. An IPTV "provider" that gives you a URL + username + password
+#       (this is the common commercial "Xtream Codes" type of account).
+#       Fill in the `provider` section below.
+#
+#    2. Your own hand-made lists of channels ("playlists").
+#       See the `playlists` section below. This is used for the free
+#       test channels that are already filled in for you.
+#
+#  You can use one OR both at the same time. Every playlist becomes a
+#  big button on the first screen. Choose a playlist, then choose a
+#  channel inside it.
+#
+#  After editing this file, restart the player with:
+#      sudo systemctl restart iptv
+#  (or just reboot the box).
+# ---------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------
+#  1) IPTV PROVIDER (optional)
+# ---------------------------------------------------------------------
+#  If you bought an IPTV subscription, put the details here.
+#  Set `enabled: true` and fill in url / username / password.
+#  The player will automatically download all your channels and group
+#  them into playlists (by category) for you.
+#
+#  Leave `enabled: false` if you don't have a provider.
+provider:
+  enabled: false
+  # The server address your provider gave you, e.g. http://example.com:8080
+  url: "http://your-provider.example.com:8080"
+  username: "YOUR_USERNAME"
+  password: "YOUR_PASSWORD"
+  # Only show these categories (leave empty [] to show all).
+  # Category names come from your provider. Example: ["News", "Sports"]
+  only_categories: []
+
+
+# ---------------------------------------------------------------------
+#  2) TV GUIDE / EPG (optional)
+# ---------------------------------------------------------------------
+#  A TV guide ("EPG") shows what is on now and what is next.
+#  Put one or more XMLTV guide addresses here. Leave empty [] for none.
+#
+#  How it works: a channel is matched to the guide using its "tvg_id"
+#  (see each channel below). If the ids match, the guide appears.
+epg:
+  # List of XMLTV guide URLs (http/https). .xml or .xml.gz both work.
+  sources: []
+  # Example (uncomment and use if you run the iptv-org epg generator):
+  #sources:
+  #  - "http://192.168.0.168:3000/guide.xml"
+  # How often to refresh the guide, in hours.
+  refresh_hours: 12
+
+
+# ---------------------------------------------------------------------
+#  3) PLAYLISTS (your own channel lists)
+# ---------------------------------------------------------------------
+#  Each playlist has a `name` (shown as a big button) and a list of
+#  `channels`. Each channel needs a `name` and a `url`.
+#
+#  Optional per channel:
+#     logo:   web address of a picture/logo
+#     tvg_id: id used to match the TV guide (see EPG above)
+#
+#  The channels below are FREE, public, legal test streams so you can
+#  confirm everything works out of the box. Replace them with your own.
+playlists:
+
+  - name: "News"
+    channels:
+      - name: "Al Jazeera English"
+        url: "https://live-hls-apps-aje-fa.getaj.net/AJE/index.m3u8"
+        tvg_id: "AlJazeera.qa@English"
+      - name: "France 24 (English)"
+        url: "https://live.france24.com/hls/live/2037218/F24_EN_HI_HLS/master_5000.m3u8"
+        tvg_id: "France24.fr@English"
+      - name: "DW English"
+        url: "https://dwamdstream102.akamaized.net/hls/live/2015525/dwstream102/master.m3u8"
+        tvg_id: "DW.de@English"
+
+  - name: "Entertainment & Sports"
+    channels:
+      - name: "Red Bull TV"
+        url: "https://rbmn-live.akamaized.net/hls/live/590964/BoRB-AT/master.m3u8"
+        tvg_id: "RedBullTV.at@SD"
+      - name: "NASA TV"
+        url: "https://ntv1.akamaized.net/hls/live/2014075/NASA-NTV1-HLS/master.m3u8"
+        tvg_id: "NASA.us"
+
+  - name: "Test Channels"
+    channels:
+      - name: "Big Buck Bunny (test)"
+        url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8"
+      - name: "Apple Test Stream"
+        url: "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8"
+
+
+# ---------------------------------------------------------------------
+#  4) APPEARANCE / BEHAVIOUR (optional, safe to leave as-is)
+# ---------------------------------------------------------------------
+settings:
+  # Text size on the menus. Bigger = easier to read from the sofa.
+  # One of: small, normal, large, extra_large
+  text_size: "large"
+  # Start playing the very first channel automatically on power-on?
+  autoplay_first_channel: false
+  # Show the clock in the corner of the menus.
+  show_clock: true

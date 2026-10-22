@@ -53,3 +53,13 @@ Two options:
 
 - If the IP changes, update `HostName` in `~/.ssh/config` under `Host pi`.
 - Verify connectivity with: `ssh pi 'echo ok'`
+
+## Git workflow (always)
+
+- Repository: `git@github.com:easyiptvbox/easyiptvbox.git` (private), branch `main`.
+- After every completed change: commit it and get it onto `main` on GitHub
+  (`git add -A && git commit -m "..." && git push`). If work was done on
+  another branch, merge it into `main` and push.
+- Commit author for this repo: `easyiptvbox <easyiptvbox@proton.me>`.
+- Never commit secrets or device data (provider credentials, `app/cache/`,
+  `app/remotes.json`, real `config.yaml`); `.gitignore` covers these.

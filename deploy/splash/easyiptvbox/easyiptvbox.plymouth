@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=EasyIPTVBox
+Description=EasyIPTVBox boot and shutdown splash
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/easyiptvbox
+ScriptFile=/usr/share/plymouth/themes/easyiptvbox/easyiptvbox.script

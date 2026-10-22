@@ -1,0 +1,17 @@
+# EasyIPTVBox: full-screen image, boot vs shutdown/reboot variant.
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+mode = Plymouth.GetMode();
+if (mode == "shutdown" || mode == "reboot")
+    img = Image("shutdown.png");
+else
+    img = Image("splash.png");
+
+sw = Window.GetWidth();
+sh = Window.GetHeight();
+scaled = img.Scale(sw, sh);
+spr = Sprite(scaled);
+spr.SetX(Window.GetX());
+spr.SetY(Window.GetY());
+spr.SetZ(0);

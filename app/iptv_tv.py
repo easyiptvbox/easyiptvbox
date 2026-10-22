@@ -70,6 +70,9 @@ TEXT = (225, 228, 235)
 DIM = (140, 145, 160)
 ACCENT = (90, 200, 120)
 
+SPLASH_DIR = "/usr/share/plymouth/themes/easyiptvbox"
+SPLASH_BOOT = os.path.join(SPLASH_DIR, "splash.png")
+SPLASH_SHUTDOWN = os.path.join(SPLASH_DIR, "shutdown.png")
 FONT_NAME = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 
@@ -175,6 +178,17 @@ class App:
             return True
         if not self._display_connected():
             return False
+        # Hand the screen over from the boot splash (Plymouth holds DRM until
+        # told to quit; --retain-splash keeps the image up until we draw).
+        if not getattr(self, "_plymouth_done", False):
+            self._plymouth_done = True
+            try:
+                import subprocess
+                subprocess.run(["sudo", "/usr/bin/plymouth", "quit",
+                                "--retain-splash"], timeout=5,
+                               capture_output=True)
+            except Exception:
+                pass
         try:
             pygame.display.init()
             pygame.font.init()
@@ -187,6 +201,7 @@ class App:
             self._display_active = True
             self._load_fonts()
             self._last_sig = None  # force a fresh redraw
+            self._show_image(SPLASH_BOOT)
             return True
         except Exception as e:
             print("Display init failed, staying headless: %s" % e, flush=True)
@@ -1041,12 +1056,29 @@ class App:
         self._last_sig = None
         self.notify("Welcome back", 2)
 
-    def shutdown(self):
-        self.notify("Shutting down...", 5)
-        self._draw()
-        if self._display_active:
+    def _show_image(self, path):
+        """Draw a full-screen image (splash) right away. Returns True if shown."""
+        try:
+            if not self._display_active or not os.path.exists(path):
+                return False
+            img = pygame.image.load(path)
+            img = pygame.transform.smoothscale(img, (self.W, self.H))
+            self.surface.blit(img, (0, 0))
             pygame.display.flip()
+            return True
+        except Exception as e:
+            print("splash failed: %s" % e, flush=True)
+            return False
+
+    def shutdown(self):
         self.player.stop()
+        self._acquire_display()
+        if not self._show_image(SPLASH_SHUTDOWN):
+            self.notify("Shutting down...", 5)
+            self._draw()
+            if self._display_active:
+                pygame.display.flip()
+        self._shutting_down = True
         import subprocess
         try:
             subprocess.Popen(["sudo", "poweroff"])
@@ -2532,6 +2564,8 @@ class App:
                              or getattr(self, "_wifi_connecting", False))
                         else 0),
                        self.message if time.time() < self.message_until else "")
+                if getattr(self, "_shutting_down", False):
+                    sig = getattr(self, "_last_sig", None)   # keep shutdown image
                 if sig != getattr(self, "_last_sig", None):
                     self._last_sig = sig
                     self._draw()

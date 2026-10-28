@@ -92,8 +92,48 @@ class ControlServer:
                 self.wfile.write(body)
 
             # ---- GET ----
+            def do_HEAD(self):
+                path = self.path.split("?")[0]
+                if path.startswith("/stream/movie/"):
+                    import iptv_stream
+                    m = iptv_stream.find_movie(path.rsplit("/", 1)[-1].split(".")[0])
+                    if m:
+                        iptv_stream.serve(self, m, head_only=True)
+                        return
+                self.send_response(404)
+                self.end_headers()
+
             def do_GET(self):
                 path = self.path.split("?")[0]
+                if path.startswith("/stream/movie/"):
+                    import iptv_stream
+                    m = iptv_stream.find_movie(path.rsplit("/", 1)[-1].split(".")[0])
+                    if m:
+                        iptv_stream.serve(self, m)
+                    else:
+                        self._send(404, {"error": "not an added movie"})
+                    return
+                if path.startswith("/player/"):
+                    import iptv_stream
+                    m = iptv_stream.find_movie(path.rsplit("/", 1)[-1])
+                    if not m:
+                        self._send(404, {"error": "not an added movie"})
+                        return
+                    import html as _h
+                    page = (PLAYER_PAGE
+                            .replace("__NAME__", _h.escape(m["name"]))
+                            .replace("__ID__", m["id"])
+                            .replace("__EXT__", m["ext"])
+                            .replace("__SAFARI__", "1" if m["ext"] in ("mp4", "m4v", "mov") else "0"))
+                    self._send(200, page, "text/html; charset=utf-8")
+                    return
+                if path == "/api/stream/movies":
+                    import iptv_stream
+                    self._send(200, {"movies": [
+                        {"id": m["id"], "name": m["name"], "ext": m["ext"]}
+                        for m in iptv_stream.added_movies()],
+                        "busy": iptv_stream.busy()})
+                    return
                 if path in ("/", "/index.html"):
                     self._send(200, PAGE, "text/html; charset=utf-8")
                 elif path == "/api/status":
@@ -587,6 +627,44 @@ def _num(v, default):
 # --------------------------------------------------------------------------
 #  The web page (single file, no external assets)
 # --------------------------------------------------------------------------
+PLAYER_PAGE = r"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__NAME__</title>
+<style>
+ body{margin:0;background:#000;color:#e1e4eb;font-family:system-ui,-apple-system,sans-serif}
+ video{width:100%;max-height:80vh;background:#000;display:block}
+ .bar{padding:1rem;display:flex;flex-direction:column;gap:.7rem}
+ h1{font-size:1.1rem;margin:0}
+ a.btn{display:block;text-align:center;padding:.9rem;border-radius:10px;
+   background:#ff8800;color:#000;font-weight:600;text-decoration:none;font-size:1.05rem}
+ a.back{color:#8a90a0;text-align:center;text-decoration:none}
+ #st{color:#8a90a0;font-size:.9rem}
+</style></head><body>
+<video id="v" controls playsinline preload="auto"></video>
+<div class="bar">
+ <h1>__NAME__</h1>
+ <div id="st"></div>
+ <a class="btn" id="vlc" href="#">Open in VLC</a>
+ <a class="back" href="/">&larr; Back to the remote</a>
+</div>
+<script>
+const src=location.origin+'/stream/movie/__ID__.__EXT__';
+document.getElementById('vlc').href=
+  'vlc-x-callback://x-callback-url/stream?url='+encodeURIComponent(src);
+const v=document.getElementById('v'), st=document.getElementById('st');
+if('__SAFARI__'==='1'){
+  st.textContent='Connecting... (the TV stops while you watch here)';
+  v.src=src;
+  v.addEventListener('playing',()=>st.textContent='');
+  v.addEventListener('waiting',()=>st.textContent='Loading...');
+  v.addEventListener('error',()=>st.textContent='Could not play here - try "Open in VLC".');
+}else{
+  v.style.display='none';
+  st.textContent='This movie format plays in VLC only. Tap "Open in VLC".';
+}
+</script></body></html>"""
+
 PAGE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -928,10 +1006,21 @@ function renderMoviesAdded(){
   ch.forEach((c,i)=>{
     const row=document.createElement('div'); row.className='sr';
     const t=document.createElement('div'); t.className='nm'; t.textContent=c.name;
+    const play=document.createElement('a'); play.className='add'; play.textContent='\u25b6 Play';
+    play.style.cssText='text-decoration:none;margin-right:.4rem';
+    const sm=(STREAMABLE||[]).find(m=>m.name===c.name);
+    if(sm){ play.href='/player/'+sm.id; }
+    else { play.textContent='Save first'; play.style.opacity='.5'; }
     const rm=document.createElement('button'); rm.className='del'; rm.textContent='Remove';
     rm.onclick=()=>{ch.splice(i,1);renderMoviesAdded();refreshSearchButtons();};
-    row.appendChild(t); row.appendChild(rm); box.appendChild(row);
+    row.appendChild(t); row.appendChild(play); row.appendChild(rm); box.appendChild(row);
   });
+}
+let STREAMABLE=[];
+async function loadStreamable(){
+  try{const r=await fetch('/api/stream/movies');STREAMABLE=(await r.json()).movies||[];}
+  catch(e){STREAMABLE=[];}
+  renderMoviesAdded();
 }
 function renderSeriesAdded(){
   const box=$('seriesAdded'); box.innerHTML='';
@@ -999,6 +1088,7 @@ async function loadForm(){
   // ensure Movies & Series always exist
   moviesPl(); seriesPl();
   renderAdded();
+  loadStreamable();
   // also fill the raw editor
 }
 
@@ -1154,7 +1244,7 @@ $('save').onclick=async()=>{
   const r=await fetch('/api/config-data',{method:'POST',
     headers:{'Content-Type':'application/json'},body:JSON.stringify(collectForm())});
   const j=await r.json();
-  if(r.ok) showMsg(true,'Saved. The TV is updating...');
+  if(r.ok){ showMsg(true,'Saved. The TV is updating...'); setTimeout(loadStreamable,1500); }
   else showMsg(false,j.error||'Save failed');
 };
 

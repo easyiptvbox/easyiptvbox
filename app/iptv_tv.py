@@ -30,6 +30,7 @@ from iptv_web import ControlServer
 from iptv_movies import MovieState
 import iptv_thumbs
 import iptv_net
+import iptv_stream
 
 WEB_PORT = int(os.environ.get("IPTV_WEB_PORT", "8080"))
 
@@ -1478,7 +1479,16 @@ class App:
         have = sum(1 for c in chans if iptv_thumbs.has_thumb(c.url))
         return have / len(chans)
 
+    def _stream_busy(self):
+        """True (and tells the user) if a phone/computer is streaming."""
+        if iptv_stream.busy():
+            self.notify("Busy - playing on another device", 4)
+            return True
+        return False
+
     def play_channel(self, idx):
+        if self._stream_busy():
+            return
         self.current_channel = self.current_playlist.channels[idx]
         # Movies: if we have a saved position, ask whether to continue.
         if self.is_movie_playing():
@@ -1519,6 +1529,11 @@ class App:
         self.player.play(url, **kwargs)
 
     def _start_movie(self, start=0):
+        if self._stream_busy():
+            if self.screen_state in (SCREEN_RESUME, SCREEN_PLAYING):
+                self.screen_state = getattr(self, "_episode_return",
+                                            SCREEN_CHANNELS)
+            return
         url = self.current_channel.url
         self._movie_url = url
         self.movie_menu = None
@@ -2389,6 +2404,14 @@ class App:
         self.start_epg_thread()
         self.start_provider_refresh_thread()
         self.start_network_optimizer_thread()
+        # streaming to other devices: stop the TV when a device starts, and
+        # cache the start of added movies while idle
+        iptv_stream.set_notify(lambda: self.remote.q.put("__remote_stream__"))
+        iptv_stream.start_cacher(lambda: (
+            self.screen_state != SCREEN_PLAYING
+            and not self.player.is_running()
+            and not self.thumbs.is_scanning()
+            and not getattr(self, "net_info", {}).get("testing")))
         # First-run / relocation helper. Network can take a while to come up
         # after boot, so check in the background for up to ~30s. If there is
         # still no network: with no remote configured, open the remote setup
@@ -2438,6 +2461,22 @@ class App:
                     self.reload_config()
                 elif a == "__learn_remote__":
                     self.open_learn_remote()
+                elif a == "__remote_stream__":
+                    if self.player.is_running() or \
+                            self.screen_state == SCREEN_PLAYING:
+                        if self.is_movie_playing():
+                            self._save_movie_position()
+                        self.thumbs.stop()
+                        self.player.stop()
+                        self._movie_url = None
+                        self.movie_menu = None
+                        self._acquire_display()
+                        self.screen_state = (SCREEN_CHANNELS
+                                             if self.current_playlist
+                                             else SCREEN_PLAYLISTS)
+                    else:
+                        self.thumbs.stop()
+                    self.notify("Playing on another device", 8)
                 elif a == "__first_run__":
                     if self.screen_state in (SCREEN_PLAYLISTS, SCREEN_CHANNELS):
                         has_remote = bool(ir.load_learned()) or any(

@@ -675,7 +675,7 @@ dl.href=src+'?dl=1';
 dl.setAttribute('download','');
 dl.addEventListener('click',()=>{
   try{ v.pause(); v.removeAttribute('src'); v.load(); }catch(e){}
-  st.textContent='Download started - see the download icon in Safari (top right).';
+  st.textContent='Download started - see the download icon.';
 });
 // stop Safari's player first: the provider allows only one connection
 document.getElementById('vlc').addEventListener('click',()=>{

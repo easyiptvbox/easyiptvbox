@@ -34,6 +34,17 @@ _last_activity = 0.0
 _notify = None              # callable() - tell the TV a device took over
 
 
+LOG_PATH = os.path.join(CACHE_DIR, "stream.log")
+
+
+def log(msg):
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write("%s %s\n" % (time.strftime("%H:%M:%S"), msg))
+    except Exception:
+        pass
+
+
 def set_notify(fn):
     global _notify
     _notify = fn
@@ -314,8 +325,9 @@ def serve(handler, movie, head_only=False):
                 handler.wfile.write(buf)
                 _last_activity = time.time()
     except (BrokenPipeError, ConnectionResetError):
-        pass                     # player closed / seeked: normal
+        log("  client closed")
     except Exception as e:
+        log("  error: %r" % (e,))
         try:
             handler.send_error(502, "Provider unavailable: %s" % e)
         except Exception:

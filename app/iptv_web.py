@@ -96,6 +96,8 @@ class ControlServer:
                 path = self.path.split("?")[0]
                 if path.startswith("/stream/movie/"):
                     import iptv_stream
+                    iptv_stream.log("HEAD %s ua=%s" % (
+                        path, (self.headers.get("User-Agent") or "")[:80]))
                     m = iptv_stream.find_movie(path.rsplit("/", 1)[-1].split(".")[0])
                     if m:
                         iptv_stream.serve(self, m, head_only=True)
@@ -107,6 +109,9 @@ class ControlServer:
                 path = self.path.split("?")[0]
                 if path.startswith("/stream/movie/"):
                     import iptv_stream
+                    iptv_stream.log("GET %s range=%s ua=%s" % (
+                        path, self.headers.get("Range"),
+                        (self.headers.get("User-Agent") or "")[:80]))
                     m = iptv_stream.find_movie(path.rsplit("/", 1)[-1].split(".")[0])
                     if m:
                         iptv_stream.serve(self, m)
@@ -640,18 +645,27 @@ PLAYER_PAGE = r"""<!DOCTYPE html>
    background:#ff8800;color:#000;font-weight:600;text-decoration:none;font-size:1.05rem}
  a.back{color:#8a90a0;text-align:center;text-decoration:none}
  #st{color:#8a90a0;font-size:.9rem}
+ .note{color:#8a90a0;font-size:.85rem;line-height:1.4;background:#1e2130;
+   border-radius:10px;padding:.7rem .8rem}
 </style></head><body>
 <video id="v" controls playsinline preload="auto"></video>
 <div class="bar">
  <h1>__NAME__</h1>
  <div id="st"></div>
  <a class="btn" id="vlc" href="#">Open in VLC</a>
+ <div class="note"><b>First time using VLC?</b> On the iPhone, open
+  <b>Settings &rsaquo; Privacy &amp; Security &rsaquo; Local Network</b> and switch
+  <b>VLC</b> on. Without it, VLC opens but shows an error and plays nothing.
+  (If VLC isn't listed, open the VLC app once and allow the question it asks.)</div>
  <a class="back" href="/">&larr; Back to the remote</a>
 </div>
 <script>
 const src=location.origin+'/stream/movie/__ID__.__EXT__';
-document.getElementById('vlc').href=
-  'vlc-x-callback://x-callback-url/stream?url='+encodeURIComponent(src);
+document.getElementById('vlc').href='vlc://'+src;
+// stop Safari's player first: the provider allows only one connection
+document.getElementById('vlc').addEventListener('click',()=>{
+  try{ v.pause(); v.removeAttribute('src'); v.load(); }catch(e){}
+});
 const v=document.getElementById('v'), st=document.getElementById('st');
 if('__SAFARI__'==='1'){
   st.textContent='Connecting... (the TV stops while you watch here)';

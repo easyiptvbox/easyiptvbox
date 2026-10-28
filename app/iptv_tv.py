@@ -1584,7 +1584,11 @@ class App:
             self._draw_list(self.current_series["name"],
                             [s["name"] for s in self.current_seasons],
                             self.season_index,
-                            "OK to open  -  Back to series")
+                            "OK to open  -  Back to series",
+                            green=[bool(s["episodes"]) and all(
+                                self.movies.is_watched(e["url"])
+                                for e in s["episodes"])
+                                for s in self.current_seasons])
         elif self.screen_state == SCREEN_EPISODES:
             eps = self.current_seasons[self.season_index]["episodes"]
             title = "%s - %s" % (self.current_series["name"],
@@ -1592,7 +1596,9 @@ class App:
             self._draw_list(title, [self._short_episode(e["title"]) for e in eps],
                             self.episode_index,
                             "OK to play  -  Back to seasons",
-                            empty="No episodes.")
+                            empty="No episodes.",
+                            green=[self.movies.is_watched(e["url"])
+                                   for e in eps])
         elif self.screen_state == SCREEN_LOADING:
             self._draw_loading()
         elif self.screen_state == SCREEN_HELP:
@@ -1617,7 +1623,8 @@ class App:
                                 int(self.H * 0.45)))
         self._draw_hint("Please wait  -  Back to cancel")
 
-    def _draw_list(self, title, items, sel, hint, empty="Nothing here."):
+    def _draw_list(self, title, items, sel, hint, empty="Nothing here.",
+                   green=None):
         """Generic vertical list (used for series / seasons / episodes)."""
         self._draw_header(title)
         if not items:
@@ -1638,6 +1645,8 @@ class App:
             pygame.draw.rect(self.surface, color, (left, y, w, row_h - 12),
                              border_radius=14)
             tcol = SELECT_TEXT if is_sel else TEXT
+            if green and green[i]:
+                tcol = (150, 240, 170) if is_sel else ACCENT
             t = self._fit(self.f_item, items[i], tcol, w - 56)
             self.surface.blit(t, (left + 28,
                                   y + (row_h - 12) // 2 - t.get_height() // 2))
@@ -2485,6 +2494,18 @@ class App:
 
             # periodically save a movie's position while it plays, so an
             # unexpected power loss still leaves a recent resume point
+            # remember progress every ~5s (mpv can't be asked after it exits)
+            if (self.screen_state == SCREEN_PLAYING and self._movie_url
+                    and time.time() - getattr(self, "_last_prog_t", 0) > 5):
+                self._last_prog_t = time.time()
+                try:
+                    pos, dur = self.player.time_pos(), self.player.duration()
+                    if pos and dur:
+                        self._last_progress = (self._movie_url, pos, dur)
+                        if pos >= dur * 0.75:
+                            self.movies.mark_watched(self._movie_url)
+                except Exception:
+                    pass
             if (self.screen_state == SCREEN_PLAYING and self.is_movie_playing()
                     and self.movie_menu is None
                     and time.time() - self._last_saved_pos > 30):
@@ -2523,6 +2544,13 @@ class App:
                 if self.is_movie_playing():
                     # a movie/episode that ran to the end -> forget resume
                     if self._movie_url:
+                        rec = self.movies.get_position(self._movie_url)
+                        last = getattr(self, "_last_progress", None)
+                        if (last and last[0] == self._movie_url and last[2]
+                                and last[1] >= last[2] * 0.75) or \
+                                (rec and rec.get("duration") and
+                                 rec["pos"] >= rec["duration"] * 0.75):
+                            self.movies.mark_watched(self._movie_url)
                         self.movies.clear_position(self._movie_url)
                     self._movie_url = None
                     self.movie_menu = None

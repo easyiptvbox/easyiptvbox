@@ -39,6 +39,7 @@ class MovieState:
         with _lock:
             self._data = _load()
         self._data.setdefault("positions", {})   # url -> {pos, duration}
+        self._data.setdefault("watched", [])     # urls watched > 75%
         self._data.setdefault("prefs", {})        # {audio_lang, sub_lang, subs_on}
 
     # -- resume positions ------------------------------------------------
@@ -48,7 +49,27 @@ class MovieState:
             return None
         return rec  # {"pos": seconds, "duration": seconds}
 
+    WATCHED_RATIO = 0.75
+
+    def is_watched(self, url):
+        return url in self._watched_set()
+
+    def _watched_set(self):
+        w = self.__dict__.get("_wset")
+        if w is None:
+            w = self.__dict__["_wset"] = set(self._data.get("watched", []))
+        return w
+
+    def mark_watched(self, url):
+        if url and url not in self._watched_set():
+            self._watched_set().add(url)
+            self._data["watched"] = sorted(self._watched_set())
+            with _lock:
+                _save(self._data)
+
     def save_position(self, url, pos, duration=0):
+        if duration and pos and pos >= duration * self.WATCHED_RATIO:
+            self.mark_watched(url)
         # If we're within the last 90s (or before 15s), treat as "finished"
         # / "not really started" and forget it, so we don't nag to resume.
         if duration and pos >= duration - 90:

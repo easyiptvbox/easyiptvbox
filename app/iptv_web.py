@@ -100,7 +100,8 @@ class ControlServer:
                         path, (self.headers.get("User-Agent") or "")[:80]))
                     m = iptv_stream.find_movie(path.rsplit("/", 1)[-1].split(".")[0])
                     if m:
-                        iptv_stream.serve(self, m, head_only=True)
+                        iptv_stream.serve(self, m, head_only=True,
+                                          download="dl=1" in self.path)
                         return
                 self.send_response(404)
                 self.end_headers()
@@ -114,7 +115,8 @@ class ControlServer:
                         (self.headers.get("User-Agent") or "")[:80]))
                     m = iptv_stream.find_movie(path.rsplit("/", 1)[-1].split(".")[0])
                     if m:
-                        iptv_stream.serve(self, m)
+                        iptv_stream.serve(self, m,
+                                          download="dl=1" in self.path)
                     else:
                         self._send(404, {"error": "not an added movie"})
                     return
@@ -129,6 +131,7 @@ class ControlServer:
                             .replace("__NAME__", _h.escape(m["name"]))
                             .replace("__ID__", m["id"])
                             .replace("__EXT__", m["ext"])
+                            .replace("__SIZE__", iptv_stream.size_text(m["id"]))
                             .replace("__SAFARI__", "1" if m["ext"] in ("mp4", "m4v", "mov") else "0"))
                     self._send(200, page, "text/html; charset=utf-8")
                     return
@@ -653,6 +656,11 @@ PLAYER_PAGE = r"""<!DOCTYPE html>
  <h1>__NAME__</h1>
  <div id="st"></div>
  <a class="btn" id="vlc" href="#">Open in VLC</a>
+ <a class="btn" id="dl" href="#" style="background:#3a3f50;color:#e1e4eb">Download to this device</a>
+ <div class="note" id="dlnote">The file is large (__SIZE__). While it downloads, the
+  TV can't play anything (the provider allows one connection). Keep this page
+  open and the phone awake until the download finishes; on iPhone it is saved
+  in the <b>Files</b> app &rsaquo; <b>Downloads</b>.</div>
  <div class="note"><b>First time using VLC?</b> On the iPhone, open
   <b>Settings &rsaquo; Privacy &amp; Security &rsaquo; Local Network</b> and switch
   <b>VLC</b> on. Without it, VLC opens but shows an error and plays nothing.
@@ -662,6 +670,13 @@ PLAYER_PAGE = r"""<!DOCTYPE html>
 <script>
 const src=location.origin+'/stream/movie/__ID__.__EXT__';
 document.getElementById('vlc').href='vlc://'+src;
+const dl=document.getElementById('dl');
+dl.href=src+'?dl=1';
+dl.setAttribute('download','');
+dl.addEventListener('click',()=>{
+  try{ v.pause(); v.removeAttribute('src'); v.load(); }catch(e){}
+  st.textContent='Download started - see the download icon in Safari (top right).';
+});
 // stop Safari's player first: the provider allows only one connection
 document.getElementById('vlc').addEventListener('click',()=>{
   try{ v.pause(); v.removeAttribute('src'); v.load(); }catch(e){}

@@ -110,6 +110,14 @@ def cache_info(mid):
         return None
 
 
+def size_text(mid):
+    info = cache_info(mid)
+    if not info:
+        return "several GB"
+    gb = info["size"] / 1e9
+    return ("%.1f GB" % gb) if gb >= 1 else ("%d MB" % (info["size"] / 1e6))
+
+
 def _parse_total(content_range):
     # "bytes 0-1023/123456"
     try:
@@ -238,7 +246,22 @@ def _open_upstream(url, start, end=None, deadline=None, status_cb=None):
         time.sleep(3)
 
 
-def serve(handler, movie, head_only=False):
+def download_name(movie):
+    """A clean file name like 'To Catch a Killer (2023).mp4'."""
+    import re
+    name = re.sub(r'[\\/:*?"<>|]+', " ", movie["name"])
+    name = re.sub(r"\s+", " ", name).strip() or "movie"
+    return "%s.%s" % (name, movie["ext"] or "mp4")
+
+
+def _disposition(fname):
+    import urllib.parse
+    ascii_name = fname.encode("ascii", "replace").decode().replace("?", "_")
+    return 'attachment; filename="%s"; filename*=UTF-8\'\'%s' % (
+        ascii_name.replace('"', ""), urllib.parse.quote(fname))
+
+
+def serve(handler, movie, head_only=False, download=False):
     """Answer an HTTP GET/HEAD for `movie` on BaseHTTPRequestHandler
     `handler`, with Range support and the cached prefix."""
     global _active, _last_activity
@@ -274,6 +297,9 @@ def serve(handler, movie, head_only=False):
             handler.send_header("Content-Type", ctype)
             handler.send_header("Accept-Ranges", "bytes")
             handler.send_header("Content-Length", str(length))
+            if download:
+                handler.send_header("Content-Disposition",
+                                    _disposition(download_name(movie)))
             if rng:
                 handler.send_header("Content-Range",
                                     "bytes %d-%d/%d" % (start, end, size))
@@ -312,6 +338,9 @@ def serve(handler, movie, head_only=False):
             handler.send_response(206 if rng else 200)
             handler.send_header("Content-Type", ctype)
             handler.send_header("Accept-Ranges", "bytes")
+            if download:
+                handler.send_header("Content-Disposition",
+                                    _disposition(download_name(movie)))
             for h in ("Content-Length", "Content-Range"):
                 if r.headers.get(h):
                     handler.send_header(h, r.headers[h])

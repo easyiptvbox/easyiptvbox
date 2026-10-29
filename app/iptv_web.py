@@ -103,6 +103,12 @@ class ControlServer:
                     return True
                 if iptv_remote.session_ok(self.headers.get("Cookie")):
                     return True
+                # stream URLs opened in VLC carry a signed token instead
+                if path.startswith("/stream/") and "?" in self.path:
+                    import urllib.parse as up
+                    qs = up.parse_qs(self.path.split("?", 1)[1])
+                    if iptv_remote.token_ok(qs.get("t", [""])[0]):
+                        return True
                 if path.startswith("/api/") or path.startswith("/stream/") \
                         or path.startswith("/hls/"):
                     self._send(401, {"error": "PIN required"})
@@ -230,7 +236,12 @@ class ControlServer:
                 if path == "/api/play/catalog":
                     import iptv_stream
                     try:
-                        self._send(200, iptv_stream.catalog())
+                        import iptv_remote
+                        cat = dict(iptv_stream.catalog())
+                        cat["token"] = (iptv_remote.stream_token()
+                                        if iptv_remote.from_vpn(self.client_address[0])
+                                        else "")
+                        self._send(200, cat)
                     except Exception as e:
                         self._send(500, {"error": str(e)})
                     return
@@ -1642,9 +1653,10 @@ function pSelect(label,options,onpick){
   wrap.appendChild(sel);
   return wrap;
 }
+let PTOKEN='';
 async function loadPlay(){
   let d;
-  try{ const r=await fetch('/api/play/catalog'); d=await r.json(); }
+  try{ const r=await fetch('/api/play/catalog'); d=await r.json(); PTOKEN=d.token||''; }
   catch(e){ $('plive').textContent='Could not load the lists.'; return; }
   PSELS=[];
   const live=$('plive'); live.innerHTML='';
@@ -1683,10 +1695,11 @@ function playItem(kind,id,name,ext){
   const v=$('pv'), st=$('pst');
   const src=location.origin+'/stream/'+kind+'/'+id+'.'+(ext||'ts');
   $('pcard').style.display=''; $('ptitle').textContent=name;
-  $('pvlc').href='vlc://'+src;
+  const tq=PTOKEN?('t='+encodeURIComponent(PTOKEN)):'';
+  $('pvlc').href='vlc://'+src+(tq?'?'+tq:'');
   const isLive=(kind==='live');
   $('pdl').style.display=isLive?'none':''; $('pdlnote').style.display=isLive?'none':'';
-  $('pdl').href=src+'?dl=1';
+  $('pdl').href=src+'?dl=1'+(tq?'&'+tq:'');
   v.style.display='';
   if(isLive){
     if(v.canPlayType('application/vnd.apple.mpegurl')){

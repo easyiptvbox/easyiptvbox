@@ -93,6 +93,29 @@ def login(pin, client_ip):
     return "%d.%s" % (expires, _sign(d["secret"], expires))
 
 
+def stream_token(days=2):
+    """A signed token for stream URLs (VLC can't send the browser cookie).
+    Only handed to clients that already have a valid session."""
+    d = _load()
+    if not d.get("secret"):
+        return ""
+    expires = int(time.time()) + days * 86400
+    return "%d.%s" % (expires, _sign(d["secret"], expires))
+
+
+def token_ok(value):
+    d = _load()
+    if not d.get("secret") or "." not in (value or ""):
+        return False
+    exp, sig = value.split(".", 1)
+    try:
+        if int(exp) < time.time():
+            return False
+    except ValueError:
+        return False
+    return hmac.compare_digest(sig, _sign(d["secret"], exp))
+
+
 def session_ok(cookie_header):
     d = _load()
     if not d.get("secret"):

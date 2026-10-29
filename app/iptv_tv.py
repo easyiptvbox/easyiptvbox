@@ -88,6 +88,7 @@ SCREEN_SEASONS = "seasons"   # seasons of a chosen series
 SCREEN_EPISODES = "episodes" # episodes of a chosen season
 SCREEN_LOADING = "loading"   # "Loading..." while fetching episodes
 SCREEN_HELP = "help"         # instructions page
+SCREEN_REMOTE = "remote_access"  # VPN QR + instructions
 SCREEN_LEARN = "learn"       # IR remote learning wizard
 SCREEN_WIFI_LIST = "wifi_list"      # pick a Wi-Fi network
 SCREEN_WIFI_KEYBOARD = "wifi_kbd"   # on-screen keyboard for the password
@@ -453,6 +454,10 @@ class App:
             self.player.volume_down(); self.notify("Volume -"); return
         if a == "mute":
             self.player.toggle_mute(); self.notify("Mute"); return
+        if self.screen_state == SCREEN_REMOTE:
+            self.screen_state = SCREEN_POWER   # any key: back to the menu
+            self._last_sig = None
+            return
         if self.screen_state == SCREEN_HELP:
             self.screen_state = SCREEN_POWER   # any key: back to the menu
             self._last_sig = None
@@ -1017,6 +1022,7 @@ class App:
 
     POWER_OPTIONS = ["Add a remote",
                      "Wi-Fi setup",
+                     "Remote access",
                      "Instructions",
                      "Standby (screen off)",
                      "Power off",
@@ -1038,6 +1044,8 @@ class App:
                 self.open_wifi_setup(reason="menu")
             elif choice == "Instructions":
                 self.screen_state = SCREEN_HELP
+            elif choice == "Remote access":
+                self._open_remote_access()
             elif choice.startswith("Standby"):
                 self.enter_standby()
             elif choice == "Power off":
@@ -1618,6 +1626,8 @@ class App:
             self._draw_loading()
         elif self.screen_state == SCREEN_HELP:
             self._draw_help()
+        elif self.screen_state == SCREEN_REMOTE:
+            self._draw_remote_access()
         elif self.screen_state == SCREEN_LEARN:
             self._draw_learn()
         elif self.screen_state == SCREEN_WIFI_LIST:
@@ -1758,6 +1768,78 @@ class App:
             if rest:
                 return rest
         return t
+
+    def _open_remote_access(self):
+        self.thumbs.stop()
+        self._acquire_display()
+        self._return_screen = getattr(self, "_return_screen", SCREEN_PLAYLISTS)
+        try:
+            import iptv_remote
+            self._ra_status = iptv_remote.status()
+        except Exception:
+            self._ra_status = {}
+        self.screen_state = SCREEN_REMOTE
+        self._last_sig = None
+
+    def _matrix_surface(self, text, target_px):
+        import qrcode
+        q = qrcode.QRCode(border=2, box_size=1,
+                          error_correction=qrcode.constants.ERROR_CORRECT_L)
+        q.add_data(text)
+        q.make(fit=True)
+        m = q.get_matrix()
+        n = len(m)
+        sc = max(1, target_px // n)
+        surf = pygame.Surface((n * sc, n * sc))
+        surf.fill((255, 255, 255))
+        for r, row in enumerate(m):
+            for c, v in enumerate(row):
+                if v:
+                    pygame.draw.rect(surf, (0, 0, 0), (c * sc, r * sc, sc, sc))
+        return surf
+
+    def _draw_remote_access(self):
+        self._draw_header("Remote access")
+        st = getattr(self, "_ra_status", {}) or {}
+        last = getattr(self.web, "last_vpn_conf", None)
+        fresh = last and time.time() - last[2] < 1800
+        left = int(self.W * 0.06)
+        if fresh:
+            qr = self._matrix_surface(last[1], int(self.H * 0.62))
+            x = self.W - qr.get_width() - int(self.W * 0.05)
+            pygame.draw.rect(self.surface, (255, 255, 255),
+                             (x - 8, int(self.H * 0.17) - 8,
+                              qr.get_width() + 16, qr.get_height() + 16),
+                             border_radius=8)
+            self.surface.blit(qr, (x, int(self.H * 0.17)))
+            text_w = x - left - 40
+        else:
+            text_w = self.W * 0.88
+        dd = st.get("duckdns") or {}
+        lines = []
+        if fresh:
+            lines += ["New device: %s" % last[0],
+                      "Scan the code with the WireGuard app:",
+                      "  + > Create from QR code", ""]
+        else:
+            lines += ["To add a phone: open the web app (scan the QR code",
+                      "on the start page) > Settings > Remote access >",
+                      "Add device. Its code is then shown here.", ""]
+        lines += ["Status: %s" % ("ON" if st.get("running") else "OFF"),
+                  "Home address: %s" % (dd.get("domain") or "not set"),
+                  "Router: forward UDP %s to %s" % (st.get("port", 51821),
+                                                    st.get("lan_ip", "")),
+                  "",
+                  "Away from home: switch WireGuard on and open",
+                  "  http://10.66.0.1:8080"]
+        y = int(self.H * 0.17)
+        step = int(self.f_small.get_linesize() * 1.25)
+        for line in lines:
+            if line:
+                t = self._fit(self.f_small, line, TEXT, text_w)
+                self.surface.blit(t, (left, y))
+            y += step
+        self._draw_hint("Press any button to go back")
 
     def _draw_header(self, title, font=None):
         t = self._fit(font or self.f_title, title, TEXT, self.W * 0.78)
@@ -2477,6 +2559,11 @@ class App:
                     else:
                         self.thumbs.stop()
                     self.notify("Playing on another device", 8)
+                elif a == "__remote_qr__":
+                    # a device was just added in the web app: show its QR
+                    if self.screen_state in (SCREEN_PLAYLISTS, SCREEN_CHANNELS,
+                                             SCREEN_POWER, SCREEN_REMOTE):
+                        self._open_remote_access()
                 elif a == "__first_run__":
                     if self.screen_state in (SCREEN_PLAYLISTS, SCREEN_CHANNELS):
                         has_remote = bool(ir.load_learned()) or any(
@@ -2625,6 +2712,7 @@ class App:
                        getattr(self, "_kb_row", 0), getattr(self, "_kb_col", 0),
                        getattr(self, "_kb_mode", ""),
                        getattr(self, "_wifi_status", ""),
+                       (getattr(self.web, "last_vpn_conf", None) or ("",))[0],
                        (int(time.time() * 2) if self.screen_state in
                         (SCREEN_WIFI_LIST, SCREEN_WIFI_CONNECT)
                         and (getattr(self, "_wifi_scanning", False)

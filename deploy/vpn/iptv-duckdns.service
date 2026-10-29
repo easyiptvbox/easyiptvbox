@@ -1,0 +1,8 @@
+[Unit]
+Description=Update DuckDNS address for EasyIPTVBox remote access
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/iptv-vpn duckdns-update

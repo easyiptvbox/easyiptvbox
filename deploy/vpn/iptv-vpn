@@ -1,0 +1,265 @@
+#!/usr/bin/env python3
+"""EasyIPTVBox remote access helper (runs as root via sudo).
+
+WireGuard VPN that gives phones access to THIS box only (no routing into the
+home network), plus a DuckDNS updater.
+
+    iptv-vpn setup                 create server keys + /etc/wireguard/wg0.conf
+    iptv-vpn enable|disable        start/stop wg0 and the DuckDNS timer
+    iptv-vpn add <name>            new device; prints its client config
+    iptv-vpn remove <name>
+    iptv-vpn status                JSON status
+    iptv-vpn set-duckdns <domain>  token is read from stdin
+    iptv-vpn duckdns-update        update the DuckDNS record now
+
+State lives in /etc/iptv-vpn (root only).
+"""
+import ipaddress
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import urllib.request
+
+STATE_DIR = "/etc/iptv-vpn"
+STATE = os.path.join(STATE_DIR, "state.json")
+WG_CONF = "/etc/wireguard/wg0.conf"
+NET = ipaddress.ip_network("10.66.0.0/24")
+SERVER_IP = "10.66.0.1"
+PORT = 51821
+NAME_RE = re.compile(r"^[A-Za-z0-9 _.-]{1,32}$")
+
+
+def sh(*cmd, inp=None):
+    return subprocess.run(cmd, input=inp, capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def load():
+    try:
+        with open(STATE) as f:
+            return json.load(f)
+    except Exception:
+        return {"enabled": False, "peers": [], "duckdns": {}}
+
+
+def save(st):
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
+              "w") as f:
+        json.dump(st, f, indent=1)
+    os.replace(tmp, STATE)
+
+
+def ensure_server(st):
+    if not st.get("server_priv"):
+        priv = sh("wg", "genkey")
+        st["server_priv"] = priv
+        st["server_pub"] = sh("wg", "pubkey", inp=priv)
+    return st
+
+
+NFT_RULES = os.path.join(STATE_DIR, "only-this-box.nft")
+
+
+def write_nft():
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    with open(NFT_RULES, "w") as f:
+        f.write("table inet iptvvpn {\n"
+                "  chain forward_drop {\n"
+                "    type filter hook forward priority 0; policy accept;\n"
+                "    iifname \"wg0\" drop\n"
+                "  }\n"
+                "}\n")
+
+
+def write_wg_conf(st):
+    write_nft()
+    lines = ["# managed by iptv-vpn - do not edit",
+             "[Interface]",
+             "Address = %s/24" % SERVER_IP,
+             "ListenPort = %d" % PORT,
+             "PrivateKey = %s" % st["server_priv"],
+             # Only this box is reachable: drop anything a VPN client tries
+             # to send through the Pi to other hosts.
+             "PostUp = nft -f %s" % NFT_RULES,
+             "PostDown = nft delete table inet iptvvpn", ""]
+    for p in st["peers"]:
+        lines += ["[Peer]", "# %s" % p["name"],
+                  "PublicKey = %s" % p["pub"],
+                  "PresharedKey = %s" % p["psk"],
+                  "AllowedIPs = %s/32" % p["ip"], ""]
+    os.makedirs("/etc/wireguard", mode=0o700, exist_ok=True)
+    with open(os.open(WG_CONF, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
+              "w") as f:
+        f.write("\n".join(lines))
+
+
+def wg_running():
+    return subprocess.run(["ip", "link", "show", "wg0"],
+                          capture_output=True).returncode == 0
+
+
+def reload_wg(st):
+    write_wg_conf(st)
+    if st.get("enabled"):
+        if wg_running():
+            stripped = sh("wg-quick", "strip", "wg0")
+            subprocess.run(["wg", "syncconf", "wg0", "/dev/stdin"],
+                           input=stripped, text=True, check=True)
+        else:
+            subprocess.run(["systemctl", "enable", "--now", "wg-quick@wg0"],
+                           check=True, capture_output=True)
+
+
+def endpoint(st):
+    dom = st.get("duckdns", {}).get("domain")
+    return "%s:%d" % (dom or "YOUR-HOME-ADDRESS", PORT)
+
+
+def client_conf(st, p):
+    return "\n".join([
+        "[Interface]",
+        "PrivateKey = %s" % p["priv"],
+        "Address = %s/32" % p["ip"],
+        "",
+        "[Peer]",
+        "PublicKey = %s" % st["server_pub"],
+        "PresharedKey = %s" % p["psk"],
+        "Endpoint = %s" % endpoint(st),
+        # only traffic for the box goes through the VPN
+        "AllowedIPs = %s/32" % SERVER_IP,
+        "PersistentKeepalive = 25", ""])
+
+
+def cmd_add(st, name):
+    if not NAME_RE.match(name):
+        raise SystemExit("bad name")
+    if any(p["name"].lower() == name.lower() for p in st["peers"]):
+        raise SystemExit("name already used")
+    used = {p["ip"] for p in st["peers"]} | {SERVER_IP}
+    ip = next(str(h) for h in NET.hosts() if str(h) not in used)
+    priv = sh("wg", "genkey")
+    p = {"name": name, "ip": ip, "priv": priv,
+         "pub": sh("wg", "pubkey", inp=priv), "psk": sh("wg", "genpsk"),
+         "created": int(time.time())}
+    st["peers"].append(p)
+    save(st)
+    reload_wg(st)
+    print(client_conf(st, p))
+
+
+def cmd_remove(st, name):
+    st["peers"] = [p for p in st["peers"] if p["name"] != name]
+    save(st)
+    reload_wg(st)
+
+
+def handshakes():
+    out = {}
+    if not wg_running():
+        return out
+    try:
+        for line in sh("wg", "show", "wg0", "dump").splitlines()[1:]:
+            f = line.split("\t")
+            out[f[0]] = int(f[4])
+    except Exception:
+        pass
+    return out
+
+
+def cmd_status(st):
+    hs = handshakes()
+    dd = st.get("duckdns", {})
+    print(json.dumps({
+        "enabled": bool(st.get("enabled")), "running": wg_running(),
+        "port": PORT, "server_ip": SERVER_IP, "endpoint": endpoint(st),
+        "duckdns": {"domain": dd.get("domain", ""),
+                    "has_token": bool(dd.get("token")),
+                    "last_ok": dd.get("last_ok", 0),
+                    "last_ip": dd.get("last_ip", ""),
+                    "last_error": dd.get("last_error", "")},
+        "peers": [{"name": p["name"], "ip": p["ip"],
+                   "last_handshake": hs.get(p["pub"], 0)}
+                  for p in st["peers"]],
+    }))
+
+
+def cmd_duckdns_update(st):
+    dd = st.get("duckdns", {})
+    if not dd.get("domain") or not dd.get("token"):
+        return
+    sub = dd["domain"].split(".duckdns.org")[0]
+    url = ("https://www.duckdns.org/update?domains=%s&token=%s&verbose=true"
+           % (sub, dd["token"]))
+    try:
+        body = urllib.request.urlopen(url, timeout=20).read().decode()
+        lines = body.split("\n")
+        if lines[0] == "OK":
+            dd["last_ok"] = int(time.time())
+            dd["last_ip"] = lines[1] if len(lines) > 1 else ""
+            dd["last_error"] = ""
+        else:
+            dd["last_error"] = "DuckDNS refused the update (check token/domain)"
+    except Exception as e:
+        dd["last_error"] = "DuckDNS unreachable: %s" % e
+    st["duckdns"] = dd
+    save(st)
+
+
+def main():
+    if len(sys.argv) < 2:
+        raise SystemExit(__doc__)
+    cmd, args = sys.argv[1], sys.argv[2:]
+    st = load()
+    if cmd == "setup":
+        ensure_server(st)
+        save(st)
+        write_wg_conf(st)
+    elif cmd == "enable":
+        ensure_server(st)
+        st["enabled"] = True
+        save(st)
+        reload_wg(st)
+        subprocess.run(["systemctl", "enable", "--now", "iptv-duckdns.timer"],
+                       capture_output=True)
+        cmd_duckdns_update(st)
+    elif cmd == "disable":
+        st["enabled"] = False
+        save(st)
+        subprocess.run(["systemctl", "disable", "--now", "wg-quick@wg0"],
+                       capture_output=True)
+        subprocess.run(["systemctl", "disable", "--now", "iptv-duckdns.timer"],
+                       capture_output=True)
+    elif cmd == "add":
+        ensure_server(st)
+        cmd_add(st, " ".join(args).strip())
+    elif cmd == "remove":
+        cmd_remove(st, " ".join(args).strip())
+    elif cmd == "status":
+        cmd_status(st)
+    elif cmd == "set-duckdns":
+        dom = args[0].strip().lower() if args else ""
+        if dom and not dom.endswith(".duckdns.org"):
+            dom += ".duckdns.org"
+        token = sys.stdin.read().strip()
+        dd = st.get("duckdns", {})
+        dd["domain"] = dom
+        if token:
+            if not re.match(r"^[0-9a-fA-F-]{20,64}$", token):
+                raise SystemExit("token looks wrong")
+            dd["token"] = token
+        st["duckdns"] = dd
+        save(st)
+        cmd_duckdns_update(st)
+    elif cmd == "duckdns-update":
+        cmd_duckdns_update(st)
+    else:
+        raise SystemExit("unknown command")
+
+
+if __name__ == "__main__":
+    main()

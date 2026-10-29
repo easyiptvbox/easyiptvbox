@@ -92,6 +92,77 @@ class ControlServer:
                 self.wfile.write(body)
 
             # ---- GET ----
+            def _gate(self):
+                """Requests over the VPN need a PIN session. Returns True if
+                the request may proceed (else a response was sent)."""
+                import iptv_remote
+                if not iptv_remote.from_vpn(self.client_address[0]):
+                    return True
+                path = self.path.split("?")[0]
+                if path in ("/login", "/api/login"):
+                    return True
+                if iptv_remote.session_ok(self.headers.get("Cookie")):
+                    return True
+                if path.startswith("/api/") or path.startswith("/stream/") \
+                        or path.startswith("/hls/"):
+                    self._send(401, {"error": "PIN required"})
+                else:
+                    self._send(200, iptv_remote.LOGIN_PAGE,
+                               "text/html; charset=utf-8")
+                return False
+
+            def _handle_remote(self, path, raw):
+                import iptv_remote
+                try:
+                    d = json.loads(raw or b"{}")
+                except Exception:
+                    d = {}
+                try:
+                    if path == "/api/login":
+                        cookie = iptv_remote.login(d.get("pin", ""),
+                                                   self.client_address[0])
+                        body = b'{"ok": true}'
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(body)))
+                        self.send_header("Set-Cookie", "%s=%s; Path=/; Max-Age=%d; "
+                                         "HttpOnly; SameSite=Lax" % (
+                                             iptv_remote.COOKIE, cookie,
+                                             iptv_remote.SESSION_DAYS * 86400))
+                        self.end_headers()
+                        self.wfile.write(body)
+                        return
+                    # managing remote access is only allowed from home
+                    if iptv_remote.from_vpn(self.client_address[0]):
+                        self._send(403, {"error": "Change remote access "
+                                         "settings from home"})
+                        return
+                    if path == "/api/remote/enable":
+                        iptv_remote.enable(bool(d.get("on")))
+                    elif path == "/api/remote/pin":
+                        iptv_remote.set_pin(d.get("pin", ""))
+                    elif path == "/api/remote/duckdns":
+                        iptv_remote.set_duckdns(str(d.get("domain", "")),
+                                                str(d.get("token", "")))
+                    elif path == "/api/remote/add":
+                        conf = iptv_remote.add_device(str(d.get("name", "")))
+                        self._send(200, {"ok": True, "conf": conf,
+                                         "qr": iptv_remote.qr_svg(conf)})
+                        outer.last_vpn_conf = (str(d.get("name", "")), conf,
+                                               time.time())
+                        outer.q.put("__remote_qr__")
+                        return
+                    elif path == "/api/remote/remove":
+                        iptv_remote.remove_device(str(d.get("name", "")))
+                    else:
+                        self._send(404, {"error": "not found"})
+                        return
+                    self._send(200, {"ok": True})
+                except ValueError as e:
+                    self._send(400, {"error": str(e)})
+                except Exception as e:
+                    self._send(500, {"error": str(e)})
+
             def _stream_item(self, path):
                 """/stream/<kind>/<id>.<ext> -> item or None."""
                 import iptv_stream
@@ -101,6 +172,8 @@ class ControlServer:
                 return iptv_stream.resolve(parts[3].split(".")[0], parts[2])
 
             def do_HEAD(self):
+                if not self._gate():
+                    return
                 path = self.path.split("?")[0]
                 if path.startswith("/stream/"):
                     import iptv_stream
@@ -115,7 +188,24 @@ class ControlServer:
                 self.end_headers()
 
             def do_GET(self):
+                if not self._gate():
+                    return
                 path = self.path.split("?")[0]
+                if path == "/login":
+                    import iptv_remote
+                    self._send(200, iptv_remote.LOGIN_PAGE,
+                               "text/html; charset=utf-8")
+                    return
+                if path == "/api/remote/status":
+                    import iptv_remote
+                    st = iptv_remote.status()
+                    st["via_vpn"] = iptv_remote.from_vpn(self.client_address[0])
+                    self._send(200, st)
+                    return
+                if path == "/api/remote/test":
+                    import iptv_remote
+                    self._send(200, iptv_remote.port_test())
+                    return
                 if path.startswith("/stream/"):
                     import iptv_stream
                     iptv_stream.log("GET %s range=%s ua=%s" % (
@@ -224,9 +314,14 @@ class ControlServer:
 
             # ---- POST ----
             def do_POST(self):
+                if not self._gate():
+                    return
                 path = self.path.split("?")[0]
                 length = int(self.headers.get("Content-Length", 0) or 0)
                 raw = self.rfile.read(length) if length else b""
+                if path.startswith("/api/login") or path.startswith("/api/remote/"):
+                    self._handle_remote(path, raw)
+                    return
                 if path == "/api/press":
                     try:
                         data = json.loads(raw or b"{}")
@@ -1005,6 +1100,64 @@ PAGE = r"""<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="card" id="raCard">
+      <h2>Remote access (VPN)</h2>
+      <div class="pnote" style="margin-top:0">Watch and control the box when you are
+        away from home, through an encrypted WireGuard VPN. Only this box is
+        reachable over the VPN &ndash; not the rest of your home network.</div>
+      <div id="raStatus" class="pnote"></div>
+      <div class="minirow" style="margin-top:.6rem">
+        <button class="ghost" id="raToggle">&hellip;</button>
+        <button class="ghost" id="raTest">Check setup</button>
+      </div>
+
+      <label>DuckDNS domain</label>
+      <input type="text" id="raDomain" placeholder="easyiptvbox1.duckdns.org" autocomplete="off">
+      <label>DuckDNS token (stored only on the box; leave empty to keep the saved one)</label>
+      <input type="password" id="raToken" autocomplete="off">
+      <button class="ghost" id="raDuckSave" style="width:100%;margin-top:.5rem">Save DuckDNS</button>
+
+      <label>PIN for remote access (4&ndash;8 digits; asked only when connecting
+        over the VPN, never at home)</label>
+      <input type="password" id="raPin" inputmode="numeric" autocomplete="new-password">
+      <button class="ghost" id="raPinSave" style="width:100%;margin-top:.5rem">Set PIN</button>
+
+      <label>Devices</label>
+      <div id="raDevices"></div>
+      <div class="minirow" style="margin-top:.5rem">
+        <input type="text" id="raNewName" placeholder="Device name, e.g. Stig iPhone">
+        <button class="ghost" id="raAdd" style="flex:0 0 auto">Add device</button>
+      </div>
+      <div id="raQr" style="display:none;margin-top:.8rem;text-align:center">
+        <div id="raQrImg" style="background:#fff;padding:10px;border-radius:10px;
+             display:inline-block;max-width:280px;width:100%"></div>
+        <div class="pnote">Scan this in the <b>WireGuard</b> app:
+          <b>+ &rsaquo; Create from QR code</b>. It is shown only once &ndash; add the
+          device again if you lose it. The same code is also shown on the TV.</div>
+        <a class="pbtn alt" id="raConfDl" href="#" download="easyiptvbox.conf">Download the
+          config file instead</a>
+      </div>
+
+      <details style="margin-top:1rem"><summary>How to set it up</summary>
+        <ol class="pnote" style="padding-left:1.2rem">
+          <li><b>Router:</b> forward <b>UDP port <span class="raPort">51821</span></b> to
+            <b><span class="raLan">192.168.0.168</span></b>, port <span class="raPort">51821</span>
+            (Sagemcom HomeBox: Access Control &rsaquo; Port Forwarding &rsaquo; Add Rules
+            Manually; Protocol UDP, External host empty).</li>
+          <li><b>DuckDNS:</b> enter your domain and token above, so the phone finds your
+            home even when your home address changes.</li>
+          <li><b>PIN:</b> set a PIN above.</li>
+          <li><b>iPhone:</b> install <b>WireGuard</b> from the App Store, then <b>Add
+            device</b> here and scan the QR code.</li>
+          <li><b>Away from home:</b> switch the VPN on in WireGuard and open
+            <a id="raBookmark" href="http://10.66.0.1:8080">http://10.66.0.1:8080</a>
+            &ndash; add it to your Home Screen (Share &rsaquo; Add to Home Screen).
+            WireGuard uses the DuckDNS name to find home; the browser always uses
+            10.66.0.1.</li>
+        </ol>
+      </details>
+    </div>
+
     <div class="card">
       <h2>IPTV provider</h2>
       <input type="hidden" id="provEnabled">
@@ -1042,7 +1195,7 @@ document.querySelectorAll('.tab[data-tab]').forEach(t=>{
     t.classList.add('active');
     document.querySelectorAll('section').forEach(s=>s.classList.remove('active'));
     document.getElementById(t.dataset.tab).classList.add('active');
-    if(t.dataset.tab==='config') loadForm();
+    if(t.dataset.tab==='config'){ loadForm(); loadRemote(); }
     if(t.dataset.tab==='play') loadPlay();
     else stopPlayer();
   });
@@ -1390,6 +1543,78 @@ $('wifiSetupBtn').onclick=async()=>{
   showMsg(true,'Look at the TV to finish Wi-Fi setup.');
 };
 loadRemotes();
+
+// ---- Remote access ----
+async function loadRemote(){
+  let st;
+  try{ st=await (await fetch('/api/remote/status')).json(); }catch(e){ return; }
+  if(!st.installed){ $('raStatus').textContent='Remote access is not installed on this box.'; return; }
+  const ago=t=>{ if(!t) return 'never'; const s=Math.round(Date.now()/1000-t);
+    return s<90?s+' s ago':s<5400?Math.round(s/60)+' min ago':s<172800?Math.round(s/3600)+' h ago':Math.round(s/86400)+' days ago'; };
+  const dd=st.duckdns||{};
+  let t=(st.enabled?(st.running?'VPN is ON':'VPN is enabled but not running'):'VPN is OFF')
+    +' (UDP '+st.port+').';
+  t+=dd.domain?(' DuckDNS: '+dd.domain+(dd.last_ok?(' \u2192 '+dd.last_ip+', updated '+ago(dd.last_ok)):'')
+    +(dd.last_error?(' \u2013 '+dd.last_error):'')+'.'):' DuckDNS not set.';
+  t+=st.has_pin?' PIN is set.':' No PIN set yet.';
+  if(st.via_vpn) t+=' (You are connected over the VPN \u2013 change these settings from home.)';
+  $('raStatus').textContent=t;
+  $('raToggle').textContent=st.enabled?'Turn remote access off':'Turn remote access on';
+  $('raToggle').onclick=async()=>{ await postJ('/api/remote/enable',{on:!st.enabled}); loadRemote(); };
+  if(!$('raDomain').value) $('raDomain').value=dd.domain||'';
+  document.querySelectorAll('.raPort').forEach(e=>e.textContent=st.port);
+  document.querySelectorAll('.raLan').forEach(e=>e.textContent=st.lan_ip||'192.168.0.168');
+  const box=$('raDevices'); box.innerHTML='';
+  (st.peers||[]).forEach(p=>{
+    const row=document.createElement('div'); row.className='sr';
+    const nm=document.createElement('div'); nm.className='nm';
+    nm.textContent=p.name+'  \u00b7  last connected: '+ago(p.last_handshake);
+    const del=document.createElement('button'); del.className='del'; del.textContent='Remove';
+    del.onclick=async()=>{ if(!confirm('Remove "'+p.name+'"? It will no longer be able to connect.'))return;
+      await postJ('/api/remote/remove',{name:p.name}); loadRemote(); };
+    row.appendChild(nm); row.appendChild(del); box.appendChild(row);
+  });
+  if(!(st.peers||[]).length) box.innerHTML='<div class="pnote" style="margin:0">No devices yet.</div>';
+}
+async function postJ(url,body){
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  let j={}; try{ j=await r.json(); }catch(e){}
+  if(!r.ok){ alert(j.error||'Failed'); throw new Error(j.error); }
+  return j;
+}
+$('raDuckSave').onclick=async()=>{
+  try{ await postJ('/api/remote/duckdns',{domain:$('raDomain').value.trim(),token:$('raToken').value.trim()});
+    $('raToken').value=''; showMsg(true,'DuckDNS saved.'); }catch(e){}
+  loadRemote();
+};
+$('raPinSave').onclick=async()=>{
+  try{ await postJ('/api/remote/pin',{pin:$('raPin').value}); $('raPin').value=''; showMsg(true,'PIN set.'); }catch(e){}
+  loadRemote();
+};
+$('raAdd').onclick=async()=>{
+  const name=$('raNewName').value.trim();
+  if(!name){ alert('Enter a device name first'); return; }
+  try{
+    const j=await postJ('/api/remote/add',{name});
+    $('raQrImg').innerHTML=j.qr;
+    const svg=$('raQrImg').querySelector('svg'); if(svg){svg.style.width='100%';svg.style.height='auto';}
+    $('raConfDl').href='data:text/plain;charset=utf-8,'+encodeURIComponent(j.conf);
+    $('raConfDl').download=name.replace(/[^A-Za-z0-9_-]+/g,'_')+'.conf';
+    $('raQr').style.display=''; $('raNewName').value='';
+  }catch(e){}
+  loadRemote();
+};
+$('raTest').onclick=async()=>{
+  $('raStatus').textContent='Checking\u2026';
+  const r=await (await fetch('/api/remote/test')).json();
+  let t=(r.listening?'\u2713 VPN service is running.':'\u2717 VPN service is not running \u2013 turn remote access on.');
+  t+=' Public address: '+(r.public_ip||'unknown')+'.';
+  if(r.dns_ok===true) t+=' \u2713 DuckDNS points to it.';
+  else if(r.dns_ok===false) t+=' \u2717 DuckDNS points to '+(r.dns_ip||'nothing')+' \u2013 check the token, or wait a few minutes.';
+  else t+=' DuckDNS not set.';
+  t+=' The router port forward can only be confirmed by connecting from outside (phone on mobile data).';
+  $('raStatus').textContent=t;
+};
 
 // ---- Play tab ----
 let PSELS=[];

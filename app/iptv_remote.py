@@ -46,11 +46,12 @@ def status():
 
 def _lan_ip():
     try:
-        r = subprocess.run(["ip", "-4", "-o", "addr", "show", "eth0"],
+        r = subprocess.run(["ip", "-4", "-o", "route", "get", "1.1.1.1"],
                            capture_output=True, text=True, timeout=4)
-        return r.stdout.split()[3].split("/")[0]
+        f = r.stdout.split()
+        return f[f.index("src") + 1]
     except Exception:
-        return "192.168.0.168"
+        return ""
 
 
 def enable(on):

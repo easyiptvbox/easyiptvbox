@@ -17,6 +17,38 @@ import socketserver
 import iptv_input as ir
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+UPDATE_STATUS = "/var/lib/iptv-update/status"
+UPDATE_SRC = "/opt/easyiptvbox"
+
+
+def _update_status():
+    """Current version + result of the last update run."""
+    import subprocess
+    st = {"commit": "", "date": "", "last": {}}
+    try:
+        r = subprocess.run(["git", "-C", UPDATE_SRC, "log", "-1",
+                            "--format=%h|%cs"], capture_output=True,
+                           text=True, timeout=5)
+        if r.returncode == 0 and "|" in r.stdout:
+            st["commit"], st["date"] = r.stdout.strip().split("|", 1)
+    except Exception:
+        pass
+    try:
+        with open(UPDATE_STATUS) as f:
+            for line in f:
+                k, _, v = line.rstrip("\n").partition("=")
+                st["last"][k] = v
+    except OSError:
+        pass
+    try:
+        r = subprocess.run(["systemctl", "is-active", "iptv-update.service"],
+                           capture_output=True, text=True, timeout=5)
+        st["running"] = r.stdout.strip() in ("active", "activating")
+    except Exception:
+        st["running"] = False
+    return st
+
+
 CONFIG_PATH = os.environ.get("IPTV_CONFIG", os.path.join(APP_DIR, "config.yaml"))
 
 # Map web button names -> action constants understood by the app
@@ -162,6 +194,9 @@ class ControlServer:
                     st["via_vpn"] = iptv_remote.from_vpn(self.client_address[0])
                     self._send(200, st)
                     return
+                if path == "/api/update/status":
+                    self._send(200, _update_status())
+                    return
                 if path == "/api/remote/test":
                     import iptv_remote
                     self._send(200, iptv_remote.port_test())
@@ -279,6 +314,12 @@ class ControlServer:
                 raw = self.rfile.read(length) if length else b""
                 if path.startswith("/api/remote/"):
                     self._handle_remote(path, raw)
+                    return
+                if path == "/api/update/run":
+                    import subprocess
+                    subprocess.Popen(["sudo", "-n", "systemctl", "start",
+                                      "--no-block", "iptv-update.service"])
+                    self._send(200, {"ok": True})
                     return
                 if path == "/api/press":
                     try:
@@ -1066,6 +1107,13 @@ PAGE = r"""<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="card" id="updCard">
+      <h2>Software updates</h2>
+      <div id="updStatus" class="pnote"></div>
+      <button class="ghost" id="updBtn" style="width:100%;margin-top:.5rem">Update now</button>
+      <div class="pnote">The box also checks for updates by itself every Monday night.</div>
+    </div>
+
     <div class="card" id="raCard">
       <h2><a class="hl" href="/help#vpn" target="_blank" rel="noopener">Remote access (VPN) <span class="hi">?</span></a></h2>
       <div class="pnote" style="margin-top:0">Watch and control the box when you are
@@ -1160,7 +1208,7 @@ document.querySelectorAll('.tab[data-tab]').forEach(t=>{
     t.classList.add('active');
     document.querySelectorAll('section').forEach(s=>s.classList.remove('active'));
     document.getElementById(t.dataset.tab).classList.add('active');
-    if(t.dataset.tab==='config'){ loadForm(); loadRemote(); }
+    if(t.dataset.tab==='config'){ loadForm(); loadRemote(); loadUpdate(); }
     if(t.dataset.tab==='play') loadPlay();
     else stopPlayer();
   });
@@ -1509,6 +1557,24 @@ $('wifiSetupBtn').onclick=async()=>{
 };
 loadRemotes();
 
+// ---- Software updates ----
+async function loadUpdate(){
+  let st;
+  try{ st=await (await fetch('/api/update/status')).json(); }catch(e){ return; }
+  const l=st.last||{};
+  let t='Version: '+(st.commit?st.commit+' ('+st.date+')':'unknown (not installed from GitHub)');
+  if(st.running) t+='\nUpdating\u2026';
+  else if(l.time) t+='\nLast check: '+l.time.replace('T',' ').slice(0,16)+' \u2013 '+(l.message||l.result);
+  $('updStatus').style.whiteSpace='pre-line';
+  $('updStatus').textContent=t;
+  $('updBtn').disabled=!!st.running;
+}
+$('updBtn').onclick=async()=>{
+  await fetch('/api/update/run',{method:'POST'});
+  showMsg(true,'Checking for updates\u2026 the player may restart.');
+  setTimeout(loadUpdate,3000);
+};
+
 // ---- Remote access ----
 async function loadRemote(){
   let st;
@@ -1527,7 +1593,7 @@ async function loadRemote(){
   $('raToggle').onclick=async()=>{ await postJ('/api/remote/enable',{on:!st.enabled}); loadRemote(); };
   if(!$('raDomain').value) $('raDomain').value=dd.domain||'';
   document.querySelectorAll('.raPort').forEach(e=>e.textContent=st.port);
-  document.querySelectorAll('.raLan').forEach(e=>e.textContent=st.lan_ip||'192.168.0.168');
+  document.querySelectorAll('.raLan').forEach(e=>e.textContent=st.lan_ip||location.hostname);
   document.querySelectorAll('.raMac').forEach(e=>e.textContent=st.lan_mac||'');
   const box=$('raDevices'); box.innerHTML='';
   (st.peers||[]).forEach(p=>{

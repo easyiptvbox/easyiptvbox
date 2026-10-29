@@ -1,0 +1,8 @@
+[Unit]
+Description=EasyIPTVBox update from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/easyiptvbox/deploy/update.sh

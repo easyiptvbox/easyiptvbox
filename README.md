@@ -7,9 +7,12 @@ the same network.
 
 ## Web remote & settings (works with no extra hardware)
 
-Open a browser on any device on the same Wi-Fi/LAN and go to:
+Connect your phone, tablet or laptop to the **same Wi-Fi/LAN as the box**,
+then **scan the QR code shown on the TV start page** with your camera. It
+opens the web remote directly, no address to type.
 
-> **http://192.168.0.168:8080**  (the Raspberry Pi's address)
+(No QR code handy? Open `http://<hostname>.local:8080`, e.g.
+`http://iptv1.local:8080`, or use the box's IP address with port 8080.)
 
 You get three tabs:
 
@@ -45,7 +48,7 @@ You get three tabs:
 
    It installs all packages, the player, services, boot splash, IR setup,
    VPN helper and the Argon ONE case software. It is safe to re-run.
-3. Open `http://<hostname>.local:8080` and set your provider, Wi-Fi and
+3. Scan the QR code on the TV start page (or open `http://<hostname>.local:8080`) and set your provider, Wi-Fi and
    remote access in **Settings** (these are per-box and never stored in git).
 
 ## Automatic updates

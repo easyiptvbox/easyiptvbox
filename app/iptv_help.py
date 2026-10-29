@@ -181,11 +181,26 @@ long is shrunk to fit, and shortened with &ldquo;&hellip;&rdquo; as a last resor
 it &ndash; not the rest of your home network &ndash; and only traffic to the box goes through the VPN.</p>
 <h3>Set up (once, from home)</h3>
 <ol>
- <li><b>Router</b>: forward <b>UDP 51821</b> to the box's address (shown in Settings), port 51821.
+ <li><b>Router &ndash; reserve the box's address</b>: the port forward points at the box's local
+  address, so it must never change, and the router must never give it to another device. In the
+  router's DHCP settings, add a <b>reservation</b> (also called &ldquo;static lease&rdquo; or
+  &ldquo;fixed IP&rdquo;) for the box: its <b>MAC address</b> and its <b>IP address</b>, both shown in
+  Settings &rsaquo; Remote access. On a Sagemcom HomeBox this is under <b>My HomeBox &rsaquo; LAN</b>
+  (DHCP / static leases); the box's current entry is also visible under Device Info &rsaquo; DHCP Leases.</li>
+ <li><b>Router &ndash; port forward</b>: forward <b>UDP 51821</b> to the box's address, port 51821.
   On a Sagemcom HomeBox: Access Control &rsaquo; Port Forwarding &rsaquo; Add Rules Manually;
   Protocol UDP; leave External host empty.</li>
- <li><b>DuckDNS</b>: enter your domain (e.g. <code>name.duckdns.org</code>) and token, then Save.
-  The box keeps it updated every 5 minutes. The token is stored only on the box.</li>
+ <li><b>DuckDNS</b> (a free name for your home, so the phone finds it even when your home's
+  internet address changes):
+  <ol type="a">
+   <li>Go to <a href="https://www.duckdns.org" target="_blank" rel="noopener">https://www.duckdns.org</a>
+    and sign in (with GitHub, Google, Reddit or X) &ndash; this creates your account.</li>
+   <li>At the top of the page you see your <b>token</b> (a long code). Keep it private.</li>
+   <li>Under <b>domains</b>, type a name and press <b>add domain</b>, e.g. <code>myhome</code>
+    &rarr; <code>myhome.duckdns.org</code>.</li>
+   <li>In Settings &rsaquo; Remote access, enter the domain and the token and press
+    <b>Save DuckDNS</b>. The box keeps it updated every 5 minutes; the token is stored only on the box.</li>
+  </ol></li>
  <li><b>PIN</b>: set a 4&ndash;8 digit PIN. It's asked only when connecting over the VPN.</li>
  <li><b>iPhone</b>: install <b>WireGuard</b>, then <b>Add device</b> in Settings and scan the QR code
   (WireGuard &rsaquo; + &rsaquo; Create from QR code). The code is shown once, also on the TV.</li>
@@ -213,7 +228,9 @@ link instead; then the username and password fields can stay empty. Press <b>Sav
 <tr><td>VLC opens but plays nothing (iPhone)</td><td>Allow Local Network for VLC (see <a href="#play">Play tab</a>).</td></tr>
 <tr><td>Can't connect over the VPN</td><td>Check the router port forward, DuckDNS (Settings &rsaquo; Check setup), and that the VPN is on in WireGuard.</td></tr>
 <tr><td>Picture stutters or freezes</td><td>Make sure the box is cool and not covered. 4K channels need a good connection.</td></tr>
-<tr><td>Can't find the web app</td><td>Scan the QR code on the TV's start page.</td></tr>
+<tr><td>Can't find the web app</td><td>Make sure your phone or computer is on the <b>same network</b>
+ (Wi-Fi) as the box &ndash; or, away from home, that the <b>VPN is switched on</b> in WireGuard and you
+ use <code>http://10.66.0.1:8080</code>. Then scan the QR code on the TV's start page.</td></tr>
 </table>
 </section>
 <p class="tip" style="text-align:center"><a href="/">&larr; Back to the web app</a></p>

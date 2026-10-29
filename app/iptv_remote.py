@@ -179,6 +179,10 @@ def status():
     st["installed"] = True
     st["has_pin"] = has_pin()
     st["lan_ip"] = _lan_ip()
+    try:
+        st["lan_mac"] = open("/sys/class/net/eth0/address").read().strip()
+    except OSError:
+        st["lan_mac"] = ""
     return st
 
 

@@ -1163,12 +1163,17 @@ PAGE = r"""<!DOCTYPE html>
 
       <details style="margin-top:1rem"><summary>How to set it up</summary>
         <ol class="pnote" style="padding-left:1.2rem">
+          <li><b>Router &ndash; reserve the address:</b> in the router's DHCP settings, reserve
+            <b><span class="raLan">192.168.0.168</span></b> for the box (MAC
+            <b><span class="raMac"></span></b>), so it never changes and no other device gets it.</li>
           <li><b>Router:</b> forward <b>UDP port <span class="raPort">51821</span></b> to
             <b><span class="raLan">192.168.0.168</span></b>, port <span class="raPort">51821</span>
             (Sagemcom HomeBox: Access Control &rsaquo; Port Forwarding &rsaquo; Add Rules
             Manually; Protocol UDP, External host empty).</li>
-          <li><b>DuckDNS:</b> enter your domain and token above, so the phone finds your
-            home even when your home address changes.</li>
+          <li><b>DuckDNS:</b> sign in at
+            <a href="https://www.duckdns.org" target="_blank" rel="noopener">duckdns.org</a>
+            (this creates your account), copy your <b>token</b>, add a domain, then enter both
+            above &ndash; so the phone finds your home even when your home address changes.</li>
           <li><b>PIN:</b> set a PIN above.</li>
           <li><b>iPhone:</b> install <b>WireGuard</b> from the App Store, then <b>Add
             device</b> here and scan the QR code.</li>
@@ -1587,6 +1592,7 @@ async function loadRemote(){
   if(!$('raDomain').value) $('raDomain').value=dd.domain||'';
   document.querySelectorAll('.raPort').forEach(e=>e.textContent=st.port);
   document.querySelectorAll('.raLan').forEach(e=>e.textContent=st.lan_ip||'192.168.0.168');
+  document.querySelectorAll('.raMac').forEach(e=>e.textContent=st.lan_mac||'');
   const box=$('raDevices'); box.innerHTML='';
   (st.peers||[]).forEach(p=>{
     const row=document.createElement('div'); row.className='sr';

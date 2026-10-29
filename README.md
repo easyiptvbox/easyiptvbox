@@ -11,11 +11,16 @@ Open a browser on any device on the same Wi-Fi/LAN and go to:
 
 > **http://192.168.0.168:8080**  (the Raspberry Pi's address)
 
-You get two tabs:
+You get three tabs:
 
 - **Remote** — on-screen buttons: Power, Up, Down, Left, Right, OK,
   Back, Home, Volume +/−, Mute. (Arrow keys / Enter / Backspace / H on a
   physical keyboard work too.)
+- **Play** — watch from your phone/laptop instead of the TV: pick a live
+  category, movie or series (season/episode) from your provider lists and
+  play it in the browser. Live TV plays in Safari (iPhone/iPad/Mac);
+  other formats can be opened in **VLC** (a link or `.m3u` file is
+  provided) and movies/episodes can be downloaded.
 - **Settings** — edit the whole configuration (channels, provider,
   TV guide) right in the browser and press **Save & Apply**; the player
   reloads automatically. Invalid YAML is rejected with an error and the

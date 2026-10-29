@@ -197,6 +197,10 @@ class ControlServer:
                 if not self._gate():
                     return
                 path = self.path.split("?")[0]
+                if path == "/help":
+                    import iptv_help
+                    self._send(200, iptv_help.HELP_PAGE, "text/html; charset=utf-8")
+                    return
                 if path == "/login":
                     import iptv_remote
                     self._send(200, iptv_remote.LOGIN_PAGE,
@@ -885,6 +889,10 @@ PAGE = r"""<!DOCTYPE html>
   .card { background:var(--panel); border-radius:12px; padding:1rem;
           margin-bottom:1rem; }
   .card h2 { margin:0 0 .8rem; font-size:1.05rem; }
+  .card h2 a.hl { color:inherit; text-decoration:none; }
+  .card h2 .hi { display:inline-block; width:1.2em; height:1.2em; line-height:1.2em;
+                 text-align:center; border-radius:50%; background:#3a3f50;
+                 color:var(--text); font-size:.75em; vertical-align:middle; }
   .pbtn { display:block; text-align:center; padding:.85rem; border-radius:10px;
           background:#ff8800; color:#000; font-weight:600; text-decoration:none;
           margin:.6rem 0 0; }
@@ -995,16 +1003,18 @@ PAGE = r"""<!DOCTYPE html>
       <div class="pnote">Playing here stops the TV, and the TV shows
         "Busy" until you stop.</div>
     </div>
-    <div class="card"><h2>Live TV</h2><div id="plive">Loading&hellip;</div></div>
-    <div class="card"><h2>Movies</h2><div id="pmovies"></div></div>
-    <div class="card"><h2>Series</h2><div id="pseries"></div><div id="peps"></div></div>
+    <div class="card"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Live TV <span class="hi">?</span></a></h2><div id="plive">Loading&hellip;</div></div>
+    <div class="card"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Movies <span class="hi">?</span></a></h2><div id="pmovies"></div></div>
+    <div class="card"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Series <span class="hi">?</span></a></h2><div id="pseries"></div><div id="peps"></div></div>
   </section>
 
   <section id="config">
+    <p style="margin:0 0 .6rem;color:var(--dim);font-size:.85rem">Tap a section title for help, or
+      <a href="/help" target="_blank" rel="noopener" style="color:#5fb3ff">read all instructions</a>.</p>
     <div class="msg" id="msg"></div>
 
     <div class="card" id="movieCard">
-      <h2>Movies</h2>
+      <h2><a class="hl" href="/help#movies" target="_blank" rel="noopener">Movies <span class="hi">?</span></a></h2>
       <div class="minirow">
         <input type="text" id="movieSearch" placeholder="Search a movie (e.g. Toy Story)">
         <button class="ghost" id="movieBtn" style="flex:0 0 auto">Search</button>
@@ -1017,7 +1027,7 @@ PAGE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card" id="seriesCard">
-      <h2>TV series</h2>
+      <h2><a class="hl" href="/help#series" target="_blank" rel="noopener">TV series <span class="hi">?</span></a></h2>
       <div class="minirow">
         <input type="text" id="seriesSearch" placeholder="Search a series (e.g. Friends)">
         <button class="ghost" id="seriesBtn" style="flex:0 0 auto">Search</button>
@@ -1030,7 +1040,7 @@ PAGE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card" id="catCard">
-      <h2>Live categories</h2>
+      <h2><a class="hl" href="/help#live" target="_blank" rel="noopener">Live categories <span class="hi">?</span></a></h2>
       <div class="minirow">
         <input type="text" id="catSearch" placeholder="Search categories (e.g. VGTV, Sport)">
         <button class="ghost" id="catBtn" style="flex:0 0 auto">Search</button>
@@ -1042,7 +1052,7 @@ PAGE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card">
-      <h2>TV guide (EPG)</h2>
+      <h2><a class="hl" href="/help#epg" target="_blank" rel="noopener">TV guide (EPG) <span class="hi">?</span></a></h2>
       <p style="color:var(--dim);font-size:.85rem;margin:.2rem 0 .6rem">
         The TV guide is automatic: your live channels are matched to a public
         guide and refreshed every 24 hours. You normally don't need to do
@@ -1059,7 +1069,7 @@ PAGE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card">
-      <h2>Appearance</h2>
+      <h2><a class="hl" href="/help#appearance" target="_blank" rel="noopener">Appearance <span class="hi">?</span></a></h2>
       <label>Text size on the TV</label>
       <select id="textSize">
         <option value="small">Small</option>
@@ -1070,7 +1080,7 @@ PAGE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card">
-      <h2>Playback</h2>
+      <h2><a class="hl" href="/help#playback" target="_blank" rel="noopener">Playback <span class="hi">?</span></a></h2>
       <label>Audio sync for live TV (milliseconds)</label>
       <input type="number" id="audioDelay" step="10" min="-2000" max="2000"
              placeholder="0">
@@ -1086,7 +1096,7 @@ PAGE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card">
-      <h2>Remotes</h2>
+      <h2><a class="hl" href="/help#remotes" target="_blank" rel="noopener">Remotes <span class="hi">?</span></a></h2>
       <div style="color:var(--dim);font-size:.85rem;margin:0 0 .6rem">
         Learned IR remotes. All listed remotes work at the same time.
         Adding one opens a setup wizard <b>on the TV</b> &mdash; follow the
@@ -1100,7 +1110,7 @@ PAGE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card">
-      <h2>Wi-Fi</h2>
+      <h2><a class="hl" href="/help#wifi" target="_blank" rel="noopener">Wi-Fi <span class="hi">?</span></a></h2>
       <div style="color:var(--dim);font-size:.85rem;margin:0 0 .6rem">
         Saved Wi-Fi networks, best first (by the last speed test). At start-up
         the TV box connects to the first one on the list that is in range.
@@ -1114,7 +1124,7 @@ PAGE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card" id="raCard">
-      <h2>Remote access (VPN)</h2>
+      <h2><a class="hl" href="/help#vpn" target="_blank" rel="noopener">Remote access (VPN) <span class="hi">?</span></a></h2>
       <div class="pnote" style="margin-top:0">Watch and control the box when you are
         away from home, through an encrypted WireGuard VPN. Only this box is
         reachable over the VPN &ndash; not the rest of your home network.</div>
@@ -1172,7 +1182,7 @@ PAGE = r"""<!DOCTYPE html>
     </div>
 
     <div class="card">
-      <h2>IPTV provider</h2>
+      <h2><a class="hl" href="/help#provider" target="_blank" rel="noopener">IPTV provider <span class="hi">?</span></a></h2>
       <input type="hidden" id="provEnabled">
       <div id="provFields">
         <label>Provider address or full URL</label>

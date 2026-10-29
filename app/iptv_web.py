@@ -92,14 +92,22 @@ class ControlServer:
                 self.wfile.write(body)
 
             # ---- GET ----
+            def _stream_item(self, path):
+                """/stream/<kind>/<id>.<ext> -> item or None."""
+                import iptv_stream
+                parts = path.split("/")
+                if len(parts) != 4 or parts[2] not in ("movie", "episode", "live"):
+                    return None
+                return iptv_stream.resolve(parts[3].split(".")[0], parts[2])
+
             def do_HEAD(self):
                 path = self.path.split("?")[0]
-                if path.startswith("/stream/movie/"):
+                if path.startswith("/stream/"):
                     import iptv_stream
                     iptv_stream.log("HEAD %s ua=%s" % (
                         path, (self.headers.get("User-Agent") or "")[:80]))
-                    m = iptv_stream.find_movie(path.rsplit("/", 1)[-1].split(".")[0])
-                    if m:
+                    m = self._stream_item(path)
+                    if m and m["kind"] != "live":
                         iptv_stream.serve(self, m, head_only=True,
                                           download="dl=1" in self.path)
                         return
@@ -108,17 +116,50 @@ class ControlServer:
 
             def do_GET(self):
                 path = self.path.split("?")[0]
-                if path.startswith("/stream/movie/"):
+                if path.startswith("/stream/"):
                     import iptv_stream
                     iptv_stream.log("GET %s range=%s ua=%s" % (
                         path, self.headers.get("Range"),
                         (self.headers.get("User-Agent") or "")[:80]))
-                    m = iptv_stream.find_movie(path.rsplit("/", 1)[-1].split(".")[0])
+                    m = self._stream_item(path)
                     if m:
                         iptv_stream.serve(self, m,
-                                          download="dl=1" in self.path)
+                                          download="dl=1" in self.path
+                                          and m["kind"] != "live")
                     else:
-                        self._send(404, {"error": "not an added movie"})
+                        self._send(404, {"error": "not in your lists"})
+                    return
+                if path.startswith("/hls/"):
+                    import iptv_stream
+                    parts = path.split("/")
+                    if len(parts) == 4:
+                        iptv_stream.hls_serve(self, parts[2], parts[3])
+                    else:
+                        self._send(404, {"error": "not found"})
+                    return
+                if path == "/api/play/catalog":
+                    import iptv_stream
+                    try:
+                        self._send(200, iptv_stream.catalog())
+                    except Exception as e:
+                        self._send(500, {"error": str(e)})
+                    return
+                if path == "/api/play/series":
+                    import iptv_stream, urllib.parse as up
+                    qs = up.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                    try:
+                        d = iptv_stream.series_episodes(qs.get("sid", [""])[0])
+                        if d is None:
+                            self._send(404, {"error": "not an added series"})
+                        else:
+                            self._send(200, d)
+                    except Exception as e:
+                        self._send(502, {"error": "Could not load episodes: %s" % e})
+                    return
+                if path == "/api/play/state":
+                    import iptv_stream
+                    self._send(200, {"busy": iptv_stream.busy(),
+                                     "live": iptv_stream.hls_state()})
                     return
                 if path.startswith("/player/"):
                     import iptv_stream
@@ -738,6 +779,11 @@ PAGE = r"""<!DOCTYPE html>
   .card { background:var(--panel); border-radius:12px; padding:1rem;
           margin-bottom:1rem; }
   .card h2 { margin:0 0 .8rem; font-size:1.05rem; }
+  .pbtn { display:block; text-align:center; padding:.85rem; border-radius:10px;
+          background:#ff8800; color:#000; font-weight:600; text-decoration:none;
+          margin:.6rem 0 0; }
+  .pbtn.alt { background:#3a3f50; color:var(--text); }
+  .pnote { color:var(--dim); font-size:.82rem; line-height:1.4; margin:.6rem 0 0; }
   label { display:block; font-size:.85rem; color:var(--dim); margin:.6rem 0 .2rem; }
   input[type=text], input[type=url], input[type=password], input[type=number],
   select {
@@ -788,6 +834,7 @@ PAGE = r"""<!DOCTYPE html>
 <header>
   <h1>TV Remote</h1>
   <button class="tab active" data-tab="remote">Remote</button>
+  <button class="tab" data-tab="play">Play</button>
   <button class="tab" data-tab="config">Settings</button>
 </header>
 <main>
@@ -819,6 +866,30 @@ PAGE = r"""<!DOCTYPE html>
       <div class="status" id="status"></div>
     </div>
     <p class="hint">Tip: you can also use the arrow keys, Enter, Backspace and H on a keyboard.</p>
+  </section>
+
+  <section id="play">
+    <div class="card" id="pcard" style="display:none">
+      <h2 id="ptitle"></h2>
+      <video id="pv" controls playsinline preload="metadata"
+             style="width:100%;max-height:60vh;background:#000;border-radius:10px"></video>
+      <div id="pst" class="pnote"></div>
+      <a class="pbtn" id="pvlc" href="#">Open in VLC</a>
+      <a class="pbtn alt" id="pdl" href="#" download>Download to this device</a>
+      <div class="pnote" id="pdlnote">Movies are large (often several GB). While a
+        download runs the TV can't play anything (the provider allows one
+        connection). Keep this page open and the phone awake until it finishes;
+        on iPhone it is saved in the <b>Files</b> app &rsaquo; <b>Downloads</b>.</div>
+      <div class="pnote"><b>First time using VLC?</b> On the iPhone, open
+        <b>Settings &rsaquo; Privacy &amp; Security &rsaquo; Local Network</b> and switch
+        <b>VLC</b> on. Without it, VLC opens but shows an error and plays nothing.
+        (If VLC isn't listed, open the VLC app once and allow the question it asks.)</div>
+      <div class="pnote">Playing here stops the TV, and the TV shows
+        "Busy" until you stop.</div>
+    </div>
+    <div class="card"><h2>Live TV</h2><div id="plive">Loading&hellip;</div></div>
+    <div class="card"><h2>Movies</h2><div id="pmovies"></div></div>
+    <div class="card"><h2>Series</h2><div id="pseries"></div><div id="peps"></div></div>
   </section>
 
   <section id="config">
@@ -972,6 +1043,8 @@ document.querySelectorAll('.tab[data-tab]').forEach(t=>{
     document.querySelectorAll('section').forEach(s=>s.classList.remove('active'));
     document.getElementById(t.dataset.tab).classList.add('active');
     if(t.dataset.tab==='config') loadForm();
+    if(t.dataset.tab==='play') loadPlay();
+    else stopPlayer();
   });
 });
 // keyboard shortcuts
@@ -1035,21 +1108,10 @@ function renderMoviesAdded(){
   ch.forEach((c,i)=>{
     const row=document.createElement('div'); row.className='sr';
     const t=document.createElement('div'); t.className='nm'; t.textContent=c.name;
-    const play=document.createElement('a'); play.className='add'; play.textContent='\u25b6 Play';
-    play.style.cssText='text-decoration:none;margin-right:.4rem';
-    const sm=(STREAMABLE||[]).find(m=>m.name===c.name);
-    if(sm){ play.href='/player/'+sm.id; }
-    else { play.textContent='Save first'; play.style.opacity='.5'; }
     const rm=document.createElement('button'); rm.className='del'; rm.textContent='Remove';
     rm.onclick=()=>{ch.splice(i,1);renderMoviesAdded();refreshSearchButtons();};
-    row.appendChild(t); row.appendChild(play); row.appendChild(rm); box.appendChild(row);
+    row.appendChild(t); row.appendChild(rm); box.appendChild(row);
   });
-}
-let STREAMABLE=[];
-async function loadStreamable(){
-  try{const r=await fetch('/api/stream/movies');STREAMABLE=(await r.json()).movies||[];}
-  catch(e){STREAMABLE=[];}
-  renderMoviesAdded();
 }
 function renderSeriesAdded(){
   const box=$('seriesAdded'); box.innerHTML='';
@@ -1117,7 +1179,6 @@ async function loadForm(){
   // ensure Movies & Series always exist
   moviesPl(); seriesPl();
   renderAdded();
-  loadStreamable();
   // also fill the raw editor
 }
 
@@ -1273,7 +1334,7 @@ $('save').onclick=async()=>{
   const r=await fetch('/api/config-data',{method:'POST',
     headers:{'Content-Type':'application/json'},body:JSON.stringify(collectForm())});
   const j=await r.json();
-  if(r.ok){ showMsg(true,'Saved. The TV is updating...'); setTimeout(loadStreamable,1500); }
+  if(r.ok) showMsg(true,'Saved. The TV is updating...');
   else showMsg(false,j.error||'Save failed');
 };
 
@@ -1329,6 +1390,103 @@ $('wifiSetupBtn').onclick=async()=>{
   showMsg(true,'Look at the TV to finish Wi-Fi setup.');
 };
 loadRemotes();
+
+// ---- Play tab ----
+let PSELS=[];
+function stopPlayer(){
+  const v=$('pv'); if(!v) return;
+  try{ v.pause(); v.removeAttribute('src'); v.load(); }catch(e){}
+}
+function pSelect(label,options,onpick){
+  const wrap=document.createElement('div');
+  if(label){const l=document.createElement('label');l.textContent=label;wrap.appendChild(l);}
+  const sel=document.createElement('select');
+  const o0=document.createElement('option'); o0.value=''; o0.textContent='\u2014 choose \u2014';
+  sel.appendChild(o0);
+  options.forEach(o=>{
+    if(o.group){
+      const g=document.createElement('optgroup'); g.label=o.group;
+      o.items.forEach(it=>{const x=document.createElement('option');x.value=it.value;x.textContent=it.text;g.appendChild(x);});
+      sel.appendChild(g);
+    }else{
+      const x=document.createElement('option'); x.value=o.value; x.textContent=o.text; sel.appendChild(x);
+    }
+  });
+  sel.onchange=()=>{ PSELS.forEach(s=>{ if(s!==sel && !s.dataset.keep) s.value=''; }); if(sel.value) onpick(sel.value); };
+  PSELS.push(sel);
+  wrap.appendChild(sel);
+  return wrap;
+}
+async function loadPlay(){
+  let d;
+  try{ const r=await fetch('/api/play/catalog'); d=await r.json(); }
+  catch(e){ $('plive').textContent='Could not load the lists.'; return; }
+  PSELS=[];
+  const live=$('plive'); live.innerHTML='';
+  (d.live||[]).forEach(cat=>{
+    live.appendChild(pSelect(cat.name+' ('+cat.channels.length+')',
+      cat.channels.map(c=>({value:c.id,text:c.name})),
+      id=>{ const c=cat.channels.find(x=>x.id===id); playItem('live',id,c.name,'ts'); }));
+  });
+  if(!(d.live||[]).length) live.textContent='No live categories added under Settings.';
+  const mv=$('pmovies'); mv.innerHTML='';
+  if((d.movies||[]).length)
+    mv.appendChild(pSelect('',d.movies.map(m=>({value:m.id,text:m.name})),
+      id=>{ const m=d.movies.find(x=>x.id===id); playItem('movie',id,m.name,m.ext); }));
+  else mv.textContent='No movies added under Settings.';
+  const se=$('pseries'); se.innerHTML=''; $('peps').innerHTML='';
+  if((d.series||[]).length){
+    const w=pSelect('',d.series.map(s=>({value:s.sid,text:s.name})),sid=>loadEpisodes(sid));
+    w.querySelector('select').dataset.keep='1';
+    se.appendChild(w);
+  } else se.textContent='No series added under Settings.';
+}
+async function loadEpisodes(sid){
+  const box=$('peps'); box.textContent='Loading episodes\u2026';
+  PSELS=PSELS.filter(s=>document.body.contains(s) && !box.contains(s));
+  try{
+    const r=await fetch('/api/play/series?sid='+encodeURIComponent(sid)); const d=await r.json();
+    if(!r.ok){ box.textContent=d.error||'Could not load episodes.'; return; }
+    box.innerHTML='';
+    const all={};
+    const groups=(d.seasons||[]).map(s=>({group:s.name,items:s.episodes.map(e=>{all[e.id]=e;return {value:e.id,text:e.title};})}));
+    box.appendChild(pSelect('Episode',groups,id=>playItem('episode',id,all[id].title,all[id].ext)));
+  }catch(e){ box.textContent='Could not load episodes.'; }
+}
+function playItem(kind,id,name,ext){
+  stopPlayer();
+  const v=$('pv'), st=$('pst');
+  const src=location.origin+'/stream/'+kind+'/'+id+'.'+(ext||'ts');
+  $('pcard').style.display=''; $('ptitle').textContent=name;
+  $('pvlc').href='vlc://'+src;
+  const isLive=(kind==='live');
+  $('pdl').style.display=isLive?'none':''; $('pdlnote').style.display=isLive?'none':'';
+  $('pdl').href=src+'?dl=1';
+  v.style.display='';
+  if(isLive){
+    if(v.canPlayType('application/vnd.apple.mpegurl')){
+      v.src='/hls/'+id+'/index.m3u8';
+      st.textContent='Press play. Live TV can take 10\u201320 seconds to start.';
+    }else{
+      v.style.display='none';
+      st.textContent='Live TV plays in Safari (iPhone/iPad/Mac) or in VLC.';
+    }
+  }else if(['mp4','m4v','mov'].includes((ext||'').toLowerCase())){
+    v.src=src; st.textContent='';
+  }else{
+    v.style.display='none';
+    st.textContent='This format plays in VLC only (or download it).';
+  }
+  $('pcard').scrollIntoView({behavior:'smooth'});
+}
+(function(){
+  const v=$('pv'), st=$('pst');
+  v.addEventListener('playing',()=>st.textContent='');
+  v.addEventListener('waiting',()=>st.textContent='Loading\u2026');
+  v.addEventListener('error',()=>{ if(v.getAttribute('src')) st.textContent='Could not play here \u2013 try "Open in VLC".'; });
+  $('pvlc').addEventListener('click',stopPlayer);
+  $('pdl').addEventListener('click',()=>{ stopPlayer(); st.textContent='Download started - see the download icon.'; });
+})();
 
 // ---- saved searches ("Add future results automatically") ----
 async function loadWatches(){

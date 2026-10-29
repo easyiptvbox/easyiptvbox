@@ -52,36 +52,124 @@ def set_notify(fn):
 
 def busy(grace=6):
     """True while a device is streaming (or was, within `grace` seconds)."""
-    return _active > 0 or (time.time() - _last_activity) < grace
+    return (_active > 0 or (time.time() - _last_activity) < grace
+            or _hls.get("alive", False))
 
 
 def movie_id(url):
     return hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
 
 
-def added_movies():
-    """[{id, name, url, ext}] for the movies in the Movies category."""
-    import yaml
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-    except Exception:
-        return []
+def _ext(url):
+    tail = url.rsplit("/", 1)[-1]
+    return tail.rsplit(".", 1)[-1].lower() if "." in tail else ""
+
+
+def _item(kind, name, url):
+    return {"id": movie_id(url), "kind": kind, "name": str(name),
+            "url": url, "ext": _ext(url)}
+
+
+_reg = {"key": None, "items": {}, "catalog": None}
+_reg_lock = threading.Lock()
+_extra = {}                 # episodes registered when listed
+
+
+def _registry():
+    """Everything that may be streamed: the categories/movies/series added
+    under Settings. Rebuilt when the config or provider cache changes."""
+    def mt(p):
+        try:
+            return os.path.getmtime(p)
+        except OSError:
+            return 0
+    key = (mt(CONFIG_PATH),
+           mt(os.path.join(CACHE_DIR, "provider_channels.json")))
+    with _reg_lock:
+        if _reg["key"] == key and _reg["catalog"] is not None:
+            return _reg["items"], _reg["catalog"]
+        from iptv_config import load_config
+        cfg = load_config()
+        items, live, movies, series = {}, [], [], []
+        for p in cfg.playlists:
+            if p.is_movies:
+                for c in p.channels:
+                    if c.url:
+                        it = _item("movie", c.name, c.url)
+                        items[it["id"]] = it
+                        movies.append({"id": it["id"], "name": it["name"],
+                                       "ext": it["ext"]})
+            elif getattr(p, "is_series", False):
+                for se in p.series:
+                    series.append({"sid": str(se["series_id"]),
+                                   "name": se["name"]})
+            else:
+                chans = []
+                for c in p.channels:
+                    if c.url:
+                        it = _item("live", c.name, c.url)
+                        items[it["id"]] = it
+                        chans.append({"id": it["id"], "name": it["name"]})
+                live.append({"name": p.display_name, "channels": chans})
+        cat = {"live": live, "movies": movies, "series": series}
+        _reg.update(key=key, items=items, catalog=cat)
+        return items, cat
+
+
+def catalog():
+    return _registry()[1]
+
+
+def series_episodes(sid):
+    """Seasons/episodes of an added series (ids registered for streaming)."""
+    if sid not in {s["sid"] for s in catalog()["series"]}:
+        return None
+    from iptv_config import fetch_series_episodes, load_config
+    prov = load_config()._data.get("provider") or {}
+    data = fetch_series_episodes(prov, sid)
     out = []
-    for p in data.get("playlists") or []:
-        if not p.get("is_movies"):
-            continue
-        for c in p.get("channels") or []:
-            url = str(c.get("url") or "")
-            if url:
-                ext = url.rsplit(".", 1)[-1].lower() if "." in url[-6:] else ""
-                out.append({"id": movie_id(url), "name": str(c.get("name", "")),
-                            "url": url, "ext": ext})
-    return out
+    for season in data.get("seasons", []):
+        eps = []
+        for e in season.get("episodes", []):
+            it = _item("episode", e["title"], e["url"])
+            _extra[it["id"]] = it
+            eps.append({"id": it["id"], "title": it["name"], "ext": it["ext"]})
+        out.append({"name": season.get("name", ""), "episodes": eps})
+    return {"seasons": out}
+
+
+def resolve(item_id, kind=None):
+    """The streamable item with this id, or None."""
+    it = _registry()[0].get(item_id) or _extra.get(item_id)
+    if it is None and kind in (None, "episode"):
+        # after a restart: look in the cached episode lists of added series
+        sids = {s["sid"] for s in catalog()["series"]}
+        for sid in sids:
+            safe = "".join(ch for ch in sid if ch.isalnum())
+            try:
+                with open(os.path.join(CACHE_DIR, "series_%s.json" % safe),
+                          "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                continue
+            for season in data.get("seasons", []):
+                for e in season.get("episodes", []):
+                    if movie_id(e["url"]) == item_id:
+                        it = _item("episode", e["title"], e["url"])
+                        _extra[item_id] = it
+                        break
+    if it and kind and it["kind"] != kind:
+        return None
+    return it
+
+
+def added_movies():
+    items = _registry()[0]
+    return [it for it in items.values() if it["kind"] == "movie"]
 
 
 def find_movie(mid):
-    return next((m for m in added_movies() if m["id"] == mid), None)
+    return resolve(mid, "movie")
 
 
 def content_type(ext):
@@ -225,12 +313,13 @@ def _parse_range(header, size):
 def _open_upstream(url, start, end=None, deadline=None, status_cb=None):
     """Open the provider stream at byte `start`, retrying while the provider
     refuses (it allows a single connection and may still count the TV's)."""
-    rng = "bytes=%d-%s" % (start, "" if end is None else end)
+    headers = {"User-Agent": UA}
+    if start or end is not None:
+        headers["Range"] = "bytes=%d-%s" % (start, "" if end is None else end)
     deadline = deadline or (time.time() + RETRY_SECONDS)
     last = None
     while True:
-        req = urllib.request.Request(url, headers={"User-Agent": UA,
-                                                   "Range": rng})
+        req = urllib.request.Request(url, headers=headers)
         try:
             return urllib.request.urlopen(req, timeout=20)
         except urllib.error.HTTPError as e:
@@ -276,6 +365,7 @@ def serve(handler, movie, head_only=False, download=False):
         first = _active == 0 and (time.time() - _last_activity) > 6
         _active += 1
         _last_activity = time.time()
+    hls_stop()
     if first and _notify:
         try:
             _notify()            # stop the TV, show "Playing on another device"
@@ -365,3 +455,175 @@ def serve(handler, movie, head_only=False, download=False):
         with _lock:
             _active -= 1
             _last_activity = time.time()
+
+
+# ---------------------------------------------------------------------------
+#  Live TV in the browser: the provider's MPEG-TS stream is repackaged by
+#  ffmpeg into HLS (video copied, audio converted to AAC) in /tmp, which
+#  Safari plays natively. One session at a time; it stops ~30s after the
+#  player stops asking for segments.
+# ---------------------------------------------------------------------------
+import re as _re
+import shutil as _shutil
+import subprocess as _sp
+
+HLS_ROOT = "/tmp/iptv-hls"
+HLS_IDLE = 30
+_hls = {"id": None, "gen": 0, "alive": False, "last": 0.0, "state": "",
+        "proc": None, "dir": None}
+_hls_lock = threading.Lock()
+_HLS_FILE = _re.compile(r"^(index\.m3u8|init\.mp4|seg\d+\.m4s)$")
+
+
+def hls_stop():
+    with _hls_lock:
+        if not _hls["alive"]:
+            return
+        _hls["gen"] += 1
+        proc = _hls["proc"]
+        _hls.update(alive=False, proc=None, state="stopped")
+    if proc and proc.poll() is None:
+        try:
+            proc.terminate()
+        except Exception:
+            pass
+
+
+def hls_state():
+    return {"id": _hls["id"], "alive": _hls["alive"], "state": _hls["state"]}
+
+
+def _hls_start(item):
+    with _hls_lock:
+        if _hls["alive"] and _hls["id"] == item["id"]:
+            _hls["last"] = time.time()
+            return
+    hls_stop()
+    d = os.path.join(HLS_ROOT, item["id"])
+    _shutil.rmtree(HLS_ROOT, ignore_errors=True)
+    os.makedirs(d, exist_ok=True)
+    with _hls_lock:
+        _hls["gen"] += 1
+        gen = _hls["gen"]
+        _hls.update(id=item["id"], alive=True, last=time.time(),
+                    state="starting", dir=d, proc=None)
+    log("live start %s" % item["name"])
+    if _notify:
+        try:
+            _notify()
+        except Exception:
+            pass
+    threading.Thread(target=_hls_run, args=(item, d, gen),
+                     daemon=True).start()
+
+
+def _hls_cmd(url, d):
+    return ["ffmpeg", "-nostdin", "-loglevel", "error",
+            "-user_agent", UA, "-rw_timeout", "15000000",
+            "-reconnect", "1", "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+            "-i", url,
+            "-map", "0:v:0?", "-map", "0:a:0?",
+            "-c:v", "copy", "-c:a", "aac", "-ac", "2", "-b:a", "160k",
+            "-f", "hls", "-hls_time", "4", "-hls_list_size", "8",
+            "-hls_flags", "delete_segments+omit_endlist+independent_segments",
+            "-hls_segment_type", "fmp4",
+            "-hls_fmp4_init_filename", "init.mp4",
+            "-hls_segment_filename", os.path.join(d, "seg%05d.m4s"),
+            os.path.join(d, "index.m3u8")]
+
+
+def _hls_run(item, d, gen):
+    global _last_activity
+    index = os.path.join(d, "index.m3u8")
+    deadline = time.time() + RETRY_SECONDS
+    try:
+        while _hls["gen"] == gen:
+            if time.time() - _hls["last"] > HLS_IDLE:
+                break
+            errf = open(os.path.join(d, "ffmpeg.log"), "ab")
+            proc = _sp.Popen(_hls_cmd(item["url"], d), stdout=_sp.DEVNULL,
+                             stderr=errf)
+            with _hls_lock:
+                if _hls["gen"] != gen:
+                    proc.kill()
+                    break
+                _hls["proc"] = proc
+            while proc.poll() is None:
+                if _hls["gen"] != gen or \
+                        time.time() - _hls["last"] > HLS_IDLE:
+                    proc.terminate()
+                    try:
+                        proc.wait(5)
+                    except Exception:
+                        proc.kill()
+                    break
+                if os.path.exists(index):
+                    _hls["state"] = "playing"
+                _last_activity = time.time()
+                time.sleep(1)
+            errf.close()
+            if _hls["gen"] != gen or time.time() - _hls["last"] > HLS_IDLE:
+                break
+            # ffmpeg ended by itself: provider refused (still counting the
+            # TV's connection) or the stream dropped -> retry for a while
+            if _hls["state"] == "playing":
+                deadline = time.time() + RETRY_SECONDS
+            if time.time() > deadline:
+                _hls["state"] = "failed"
+                log("live failed %s" % item["name"])
+                return
+            _hls["state"] = "waiting"
+            time.sleep(3)
+    finally:
+        with _hls_lock:
+            if _hls["gen"] == gen:
+                if _hls["state"] != "failed":
+                    _hls["state"] = "stopped"
+                _hls.update(alive=False, proc=None)
+                _last_activity = time.time()
+        log("live stop %s" % item["name"])
+
+
+def hls_serve(handler, item_id, fname):
+    """Serve /hls/<id>/<fname>. Requesting the playlist starts the session."""
+    if not _HLS_FILE.match(fname):
+        handler.send_error(404)
+        return
+    item = resolve(item_id, "live")
+    if not item:
+        handler.send_error(404)
+        return
+    if fname == "index.m3u8":
+        _hls_start(item)
+    with _hls_lock:
+        if _hls["id"] == item_id:
+            _hls["last"] = time.time()
+    d = os.path.join(HLS_ROOT, item_id)
+    path = os.path.join(d, fname)
+    # wait for ffmpeg to produce the file (provider may make us wait)
+    end = time.time() + (100 if fname == "index.m3u8" else 15)
+    while not os.path.exists(path) and time.time() < end:
+        if _hls["id"] != item_id or _hls["state"] == "failed":
+            break
+        time.sleep(0.5)
+        with _hls_lock:
+            if _hls["id"] == item_id:
+                _hls["last"] = time.time()
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        handler.send_error(503, "Live stream not available right now")
+        return
+    ctype = ("application/vnd.apple.mpegurl" if fname.endswith(".m3u8")
+             else "video/mp4")
+    handler.send_response(200)
+    handler.send_header("Content-Type", ctype)
+    handler.send_header("Content-Length", str(len(data)))
+    handler.send_header("Cache-Control", "no-cache")
+    handler.end_headers()
+    try:
+        handler.wfile.write(data)
+    except (BrokenPipeError, ConnectionResetError):
+        pass

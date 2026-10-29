@@ -989,7 +989,9 @@ PAGE = r"""<!DOCTYPE html>
       <div class="pnote"><b>First time using VLC?</b> On the iPhone, open
         <b>Settings &rsaquo; Privacy &amp; Security &rsaquo; Local Network</b> and switch
         <b>VLC</b> on. Without it, VLC opens but shows an error and plays nothing.
-        (If VLC isn't listed, open the VLC app once and allow the question it asks.)</div>
+        (If VLC isn't listed, open the VLC app once and allow the question it asks.)
+        <br><b>On a computer</b>, "Open in VLC" downloads a small <b>.m3u</b> file &ndash;
+        open it with VLC (choose VLC the first time).</div>
       <div class="pnote">Playing here stops the TV, and the TV shows
         "Busy" until you stop.</div>
     </div>
@@ -1696,7 +1698,19 @@ function playItem(kind,id,name,ext){
   const src=location.origin+'/stream/'+kind+'/'+id+'.'+(ext||'ts');
   $('pcard').style.display=''; $('ptitle').textContent=name;
   const tq=PTOKEN?('t='+encodeURIComponent(PTOKEN)):'';
-  $('pvlc').href='vlc://'+src+(tq?'?'+tq:'');
+  const vsrc=src+(tq?'?'+tq:'');
+  const ios=/iPhone|iPad|iPod/.test(navigator.userAgent) ||
+            (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+  if(ios){
+    // VLC for iOS understands vlc:// links
+    $('pvlc').href='vlc://'+vsrc;
+    $('pvlc').removeAttribute('download');
+  }else{
+    // desktop VLC doesn't: hand over a small playlist file instead
+    $('pvlc').href='data:audio/x-mpegurl;charset=utf-8,'+
+      encodeURIComponent('#EXTM3U\n#EXTINF:-1,'+name+'\n'+vsrc+'\n');
+    $('pvlc').setAttribute('download',(name||'stream').replace(/[^A-Za-z0-9 _.-]+/g,'_').trim()+'.m3u');
+  }
   const isLive=(kind==='live');
   $('pdl').style.display=isLive?'none':''; $('pdlnote').style.display=isLive?'none':'';
   $('pdl').href=src+'?dl=1'+(tq?'&'+tq:'');

@@ -61,5 +61,8 @@ Two options:
   (`git add -A && git commit -m "..." && git push`). If work was done on
   another branch, merge it into `main` and push.
 - Commit author for this repo: `easyiptvbox <easyiptvbox@proton.me>`.
+- Keep `WHATS_NEW.md` current: add user-visible changes/fixes under the current
+  week (newest week on top, keep only the last 10 weeks).
+- Do not change the Pi directly; it updates itself on Mondays or via the app.
 - Never commit secrets or device data (provider credentials, `app/cache/`,
   `app/remotes.json`, real `config.yaml`); `.gitignore` covers these.

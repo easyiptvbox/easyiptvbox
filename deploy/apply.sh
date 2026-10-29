@@ -71,7 +71,12 @@ fi
 
 # --- services ---
 if [ "$units_changed" = 1 ]; then systemctl daemon-reload; fi
-systemctl enable iptv.service iptv-ir.service iptv-duckdns.timer iptv-update.timer >/dev/null 2>&1 || true
-systemctl start iptv-update.timer iptv-duckdns.timer >/dev/null 2>&1 || true
+systemctl enable iptv.service iptv-ir.service iptv-duckdns.timer >/dev/null 2>&1 || true
+systemctl start iptv-duckdns.timer >/dev/null 2>&1 || true
+# weekly auto-update is on unless the user switched it off in the web app
+if [ ! -e /var/lib/iptv-update/auto-off ]; then
+    systemctl enable iptv-update.timer >/dev/null 2>&1 || true
+    systemctl start iptv-update.timer >/dev/null 2>&1 || true
+fi
 [ "$units_changed" = 1 ] && touch "$FLAG"
 exit 0

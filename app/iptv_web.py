@@ -40,6 +40,7 @@ def _update_status():
                 st["last"][k] = v
     except OSError:
         pass
+    st["auto"] = not os.path.exists("/var/lib/iptv-update/auto-off")
     try:
         r = subprocess.run(["systemctl", "is-active", "iptv-update.service"],
                            capture_output=True, text=True, timeout=5)
@@ -314,6 +315,22 @@ class ControlServer:
                 raw = self.rfile.read(length) if length else b""
                 if path.startswith("/api/remote/"):
                     self._handle_remote(path, raw)
+                    return
+                if path == "/api/update/auto":
+                    import subprocess
+                    try:
+                        on = bool(json.loads(raw or b"{}").get("on"))
+                    except Exception:
+                        on = True
+                    # marker keeps the choice across updates (apply.sh)
+                    subprocess.run(["sudo", "-n", "sh", "-c",
+                        "mkdir -p /var/lib/iptv-update && " +
+                        ("rm -f /var/lib/iptv-update/auto-off && "
+                         "systemctl enable --now iptv-update.timer" if on else
+                         "touch /var/lib/iptv-update/auto-off && "
+                         "systemctl disable --now iptv-update.timer")],
+                        capture_output=True, timeout=20)
+                    self._send(200, {"ok": True, "auto": on})
                     return
                 if path == "/api/update/run":
                     import subprocess
@@ -1111,7 +1128,11 @@ PAGE = r"""<!DOCTYPE html>
       <h2>Software updates</h2>
       <div id="updStatus" class="pnote"></div>
       <button class="ghost" id="updBtn" style="width:100%;margin-top:.5rem">Update now</button>
-      <div class="pnote">The box also checks for updates by itself every Monday night.</div>
+      <label style="display:flex;gap:.5rem;align-items:center;margin-top:.7rem;cursor:pointer">
+        <input type="checkbox" id="updAuto" style="width:auto;margin:0">
+        <span>Check for updates by itself every Monday night</span>
+      </label>
+      <div class="pnote"><a href="https://github.com/easyiptvbox/easyiptvbox/blob/main/WHATS_NEW.md" target="_blank" rel="noopener">What&rsquo;s new</a> &ndash; see the latest changes on GitHub before you update.</div>
     </div>
 
     <div class="card" id="raCard">
@@ -1568,7 +1589,14 @@ async function loadUpdate(){
   $('updStatus').style.whiteSpace='pre-line';
   $('updStatus').textContent=t;
   $('updBtn').disabled=!!st.running;
+  $('updAuto').checked=!!st.auto;
 }
+$('updAuto').onchange=async()=>{
+  const on=$('updAuto').checked;
+  await fetch('/api/update/auto',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:on})});
+  showMsg(true,on?'Automatic weekly updates are on.':'Automatic weekly updates are off.');
+  loadUpdate();
+};
 $('updBtn').onclick=async()=>{
   await fetch('/api/update/run',{method:'POST'});
   showMsg(true,'Checking for updates\u2026 the player may restart.');

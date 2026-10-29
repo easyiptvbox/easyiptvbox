@@ -201,15 +201,15 @@ it &ndash; not the rest of your home network &ndash; and only traffic to the box
    <li>In Settings &rsaquo; Remote access, enter the domain and the token and press
     <b>Save DuckDNS</b>. The box keeps it updated every 5 minutes; the token is stored only on the box.</li>
   </ol></li>
- <li><b>PIN</b>: set a 4&ndash;8 digit PIN. It's asked only when connecting over the VPN.</li>
  <li><b>iPhone</b>: install <b>WireGuard</b>, then <b>Add device</b> in Settings and scan the QR code
   (WireGuard &rsaquo; + &rsaquo; Create from QR code). The code is shown once, also on the TV.</li>
 </ol>
 <h3>Away from home</h3>
 <p>Switch the VPN on in WireGuard and open <code>http://10.66.0.1:8080</code> (add it to the Home Screen).
 WireGuard uses your DuckDNS name to find home; the browser always uses 10.66.0.1.</p>
-<p class="tip">Remote-access settings can only be changed from home. Five wrong PINs lock that
-device out for 5 minutes. Remove a lost phone under Devices.</p>
+<p class="tip">Each phone has its own VPN key: without one, nothing at home can be reached.
+Remote-access settings can only be changed from home. Lost a phone? Remove it under Devices &ndash;
+its key stops working at once.</p>
 <p class="warn">Live TV over mobile data uses roughly 2&ndash;8 GB per hour.</p>
 </section>
 

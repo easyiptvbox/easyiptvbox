@@ -92,31 +92,6 @@ class ControlServer:
                 self.wfile.write(body)
 
             # ---- GET ----
-            def _gate(self):
-                """Requests over the VPN need a PIN session. Returns True if
-                the request may proceed (else a response was sent)."""
-                import iptv_remote
-                if not iptv_remote.from_vpn(self.client_address[0]):
-                    return True
-                path = self.path.split("?")[0]
-                if path in ("/login", "/api/login"):
-                    return True
-                if iptv_remote.session_ok(self.headers.get("Cookie")):
-                    return True
-                # stream URLs opened in VLC carry a signed token instead
-                if path.startswith("/stream/") and "?" in self.path:
-                    import urllib.parse as up
-                    qs = up.parse_qs(self.path.split("?", 1)[1])
-                    if iptv_remote.token_ok(qs.get("t", [""])[0]):
-                        return True
-                if path.startswith("/api/") or path.startswith("/stream/") \
-                        or path.startswith("/hls/"):
-                    self._send(401, {"error": "PIN required"})
-                else:
-                    self._send(200, iptv_remote.LOGIN_PAGE,
-                               "text/html; charset=utf-8")
-                return False
-
             def _handle_remote(self, path, raw):
                 import iptv_remote
                 try:
@@ -124,20 +99,6 @@ class ControlServer:
                 except Exception:
                     d = {}
                 try:
-                    if path == "/api/login":
-                        cookie = iptv_remote.login(d.get("pin", ""),
-                                                   self.client_address[0])
-                        body = b'{"ok": true}'
-                        self.send_response(200)
-                        self.send_header("Content-Type", "application/json")
-                        self.send_header("Content-Length", str(len(body)))
-                        self.send_header("Set-Cookie", "%s=%s; Path=/; Max-Age=%d; "
-                                         "HttpOnly; SameSite=Lax" % (
-                                             iptv_remote.COOKIE, cookie,
-                                             iptv_remote.SESSION_DAYS * 86400))
-                        self.end_headers()
-                        self.wfile.write(body)
-                        return
                     # managing remote access is only allowed from home
                     if iptv_remote.from_vpn(self.client_address[0]):
                         self._send(403, {"error": "Change remote access "
@@ -145,8 +106,6 @@ class ControlServer:
                         return
                     if path == "/api/remote/enable":
                         iptv_remote.enable(bool(d.get("on")))
-                    elif path == "/api/remote/pin":
-                        iptv_remote.set_pin(d.get("pin", ""))
                     elif path == "/api/remote/duckdns":
                         iptv_remote.set_duckdns(str(d.get("domain", "")),
                                                 str(d.get("token", "")))
@@ -178,8 +137,6 @@ class ControlServer:
                 return iptv_stream.resolve(parts[3].split(".")[0], parts[2])
 
             def do_HEAD(self):
-                if not self._gate():
-                    return
                 path = self.path.split("?")[0]
                 if path.startswith("/stream/"):
                     import iptv_stream
@@ -194,17 +151,10 @@ class ControlServer:
                 self.end_headers()
 
             def do_GET(self):
-                if not self._gate():
-                    return
                 path = self.path.split("?")[0]
                 if path == "/help":
                     import iptv_help
                     self._send(200, iptv_help.HELP_PAGE, "text/html; charset=utf-8")
-                    return
-                if path == "/login":
-                    import iptv_remote
-                    self._send(200, iptv_remote.LOGIN_PAGE,
-                               "text/html; charset=utf-8")
                     return
                 if path == "/api/remote/status":
                     import iptv_remote
@@ -240,12 +190,7 @@ class ControlServer:
                 if path == "/api/play/catalog":
                     import iptv_stream
                     try:
-                        import iptv_remote
-                        cat = dict(iptv_stream.catalog())
-                        cat["token"] = (iptv_remote.stream_token()
-                                        if iptv_remote.from_vpn(self.client_address[0])
-                                        else "")
-                        self._send(200, cat)
+                        self._send(200, iptv_stream.catalog())
                     except Exception as e:
                         self._send(500, {"error": str(e)})
                     return
@@ -329,12 +274,10 @@ class ControlServer:
 
             # ---- POST ----
             def do_POST(self):
-                if not self._gate():
-                    return
                 path = self.path.split("?")[0]
                 length = int(self.headers.get("Content-Length", 0) or 0)
                 raw = self.rfile.read(length) if length else b""
-                if path.startswith("/api/login") or path.startswith("/api/remote/"):
+                if path.startswith("/api/remote/"):
                     self._handle_remote(path, raw)
                     return
                 if path == "/api/press":
@@ -1140,11 +1083,6 @@ PAGE = r"""<!DOCTYPE html>
       <input type="password" id="raToken" autocomplete="off">
       <button class="ghost" id="raDuckSave" style="width:100%;margin-top:.5rem">Save DuckDNS</button>
 
-      <label>PIN for remote access (4&ndash;8 digits; asked only when connecting
-        over the VPN, never at home)</label>
-      <input type="password" id="raPin" inputmode="numeric" autocomplete="new-password">
-      <button class="ghost" id="raPinSave" style="width:100%;margin-top:.5rem">Set PIN</button>
-
       <label>Devices</label>
       <div id="raDevices"></div>
       <div class="minirow" style="margin-top:.5rem">
@@ -1174,7 +1112,6 @@ PAGE = r"""<!DOCTYPE html>
             <a href="https://www.duckdns.org" target="_blank" rel="noopener">duckdns.org</a>
             (this creates your account), copy your <b>token</b>, add a domain, then enter both
             above &ndash; so the phone finds your home even when your home address changes.</li>
-          <li><b>PIN:</b> set a PIN above.</li>
           <li><b>iPhone:</b> install <b>WireGuard</b> from the App Store, then <b>Add
             device</b> here and scan the QR code.</li>
           <li><b>Away from home:</b> switch the VPN on in WireGuard and open
@@ -1584,7 +1521,6 @@ async function loadRemote(){
     +' (UDP '+st.port+').';
   t+=dd.domain?(' DuckDNS: '+dd.domain+(dd.last_ok?(' \u2192 '+dd.last_ip+', updated '+ago(dd.last_ok)):'')
     +(dd.last_error?(' \u2013 '+dd.last_error):'')+'.'):' DuckDNS not set.';
-  t+=st.has_pin?' PIN is set.':' No PIN set yet.';
   if(st.via_vpn) t+=' (You are connected over the VPN \u2013 change these settings from home.)';
   $('raStatus').textContent=t;
   $('raToggle').textContent=st.enabled?'Turn remote access off':'Turn remote access on';
@@ -1614,10 +1550,6 @@ async function postJ(url,body){
 $('raDuckSave').onclick=async()=>{
   try{ await postJ('/api/remote/duckdns',{domain:$('raDomain').value.trim(),token:$('raToken').value.trim()});
     $('raToken').value=''; showMsg(true,'DuckDNS saved.'); }catch(e){}
-  loadRemote();
-};
-$('raPinSave').onclick=async()=>{
-  try{ await postJ('/api/remote/pin',{pin:$('raPin').value}); $('raPin').value=''; showMsg(true,'PIN set.'); }catch(e){}
   loadRemote();
 };
 $('raAdd').onclick=async()=>{
@@ -1671,10 +1603,9 @@ function pSelect(label,options,onpick){
   wrap.appendChild(sel);
   return wrap;
 }
-let PTOKEN='';
 async function loadPlay(){
   let d;
-  try{ const r=await fetch('/api/play/catalog'); d=await r.json(); PTOKEN=d.token||''; }
+  try{ const r=await fetch('/api/play/catalog'); d=await r.json(); }
   catch(e){ $('plive').textContent='Could not load the lists.'; return; }
   PSELS=[];
   const live=$('plive'); live.innerHTML='';
@@ -1713,7 +1644,7 @@ function playItem(kind,id,name,ext){
   const v=$('pv'), st=$('pst');
   const src=location.origin+'/stream/'+kind+'/'+id+'.'+(ext||'ts');
   $('pcard').style.display=''; $('ptitle').textContent=name;
-  const tq=PTOKEN?('t='+encodeURIComponent(PTOKEN)):'';
+  const tq='';
   const vsrc=src+(tq?'?'+tq:'');
   const ios=/iPhone|iPad|iPod/.test(navigator.userAgent) ||
             (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);

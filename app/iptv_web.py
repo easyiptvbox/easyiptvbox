@@ -26,7 +26,7 @@ def _update_status():
     import subprocess
     st = {"commit": "", "date": "", "last": {}}
     try:
-        r = subprocess.run(["git", "-C", UPDATE_SRC, "log", "-1",
+        r = subprocess.run(["git", "-c", "safe.directory=*", "-C", UPDATE_SRC, "log", "-1",
                             "--format=%h|%cs"], capture_output=True,
                            text=True, timeout=5)
         if r.returncode == 0 and "|" in r.stdout:

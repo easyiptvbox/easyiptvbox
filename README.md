@@ -26,6 +26,33 @@ You get two tabs:
 > ONE case has one on GPIO23, already configured here, or add a cheap
 > TSOP38238/VS1838B module to GPIO23). Until then, use the web remote.
 
+## Fresh install (new Raspberry Pi 5)
+
+1. Flash **Raspberry Pi OS Lite (Trixie, arm64)** with Raspberry Pi Imager.
+   In the advanced settings set user **`iptv`**, hostname (e.g. `iptv1`),
+   Wi-Fi, locale and enable SSH.
+2. Boot, connect (`ssh iptv@<hostname>.local`) and run:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/easyiptvbox/easyiptvbox/main/deploy/bootstrap.sh | sudo bash
+   sudo reboot
+   ```
+
+   It installs all packages, the player, services, boot splash, IR setup,
+   VPN helper and the Argon ONE case software. It is safe to re-run.
+3. Open `http://<hostname>.local:8080` and set your provider, Wi-Fi and
+   remote access in **Settings** (these are per-box and never stored in git).
+
+## Automatic updates
+
+Every box checks GitHub (`main`) **every Monday ~04:00** (`iptv-update.timer`)
+and applies new versions: it fast-forwards `/opt/easyiptvbox`, syncs the app
+(your `config.yaml`, `remotes.json` and cache are never touched), restarts the
+player and rolls back automatically if the player doesn't start.
+Use **Settings > Software updates > Update now** to update immediately, or
+`sudo /opt/easyiptvbox/deploy/update.sh`. Logs: `journalctl -u iptv-update`.
+Only the repo owner can push to `main`.
+
 ## How to use the remote
 
 | Button        | What it does                                  |

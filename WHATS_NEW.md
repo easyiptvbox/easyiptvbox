@@ -5,6 +5,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 26 October 2026
 
 **New**
+- Movies and Series now show **posters** instead of text lists, on the TV (poster grid) and in the web app's Play tab (with a filter box). Posters come from your provider and are cached on the box; items without a picture show their title.
 - Software updates: the box now updates itself from GitHub (optional weekly check), with an **Update now** button and a version display in Settings.
 - Fresh-install script (`deploy/bootstrap.sh`) to set up a new Raspberry Pi with one command.
 - **Play** tab: watch live TV, movies and series episodes from your phone or computer, with "Open in VLC" and download.

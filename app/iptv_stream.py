@@ -70,7 +70,7 @@ def _item(kind, name, url):
             "url": url, "ext": _ext(url)}
 
 
-_reg = {"key": None, "items": {}, "catalog": None}
+_reg = {"key": None, "items": {}, "catalog": None, "posters": {}}
 _reg_lock = threading.Lock()
 _extra = {}                 # episodes registered when listed
 
@@ -91,6 +91,16 @@ def _registry():
         from iptv_config import load_config
         cfg = load_config()
         items, live, movies, series = {}, [], [], []
+        posters = {}
+
+        def poster(url):
+            """Short id for a provider poster URL ('' if none)."""
+            if not url or not str(url).lower().startswith(("http://", "https://")):
+                return ""
+            pid = hashlib.sha1(str(url).encode("utf-8")).hexdigest()[:12]
+            posters[pid] = str(url)
+            return pid
+
         for p in cfg.playlists:
             if p.is_movies:
                 for c in p.channels:
@@ -98,11 +108,13 @@ def _registry():
                         it = _item("movie", c.name, c.url)
                         items[it["id"]] = it
                         movies.append({"id": it["id"], "name": it["name"],
-                                       "ext": it["ext"]})
+                                       "ext": it["ext"],
+                                       "poster": poster(c.logo)})
             elif getattr(p, "is_series", False):
                 for se in p.series:
                     series.append({"sid": str(se["series_id"]),
-                                   "name": se["name"]})
+                                   "name": se["name"],
+                                   "poster": poster(se.get("logo", ""))})
             else:
                 chans = []
                 for c in p.channels:
@@ -112,8 +124,14 @@ def _registry():
                         chans.append({"id": it["id"], "name": it["name"]})
                 live.append({"name": p.display_name, "channels": chans})
         cat = {"live": live, "movies": movies, "series": series}
-        _reg.update(key=key, items=items, catalog=cat)
+        _reg.update(key=key, items=items, catalog=cat, posters=posters)
         return items, cat
+
+
+def poster_url(pid):
+    """Provider poster URL for a catalog poster id (only known ids)."""
+    _registry()
+    return _reg["posters"].get(pid)
 
 
 def catalog():

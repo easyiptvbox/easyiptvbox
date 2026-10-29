@@ -20,7 +20,7 @@ You get three tabs:
   Back, Home, Volume +/−, Mute. (Arrow keys / Enter / Backspace / H on a
   physical keyboard work too.)
 - **Play** — watch from your phone/laptop instead of the TV: pick a live
-  category, movie or series (season/episode) from your provider lists and
+  category, or a movie/series from a poster grid (season/episode for series) and
   play it in the browser. Live TV plays in Safari (iPhone/iPad/Mac);
   other formats can be opened in **VLC** (a link or `.m3u` file is
   provided) and movies/episodes can be downloaded.
@@ -80,6 +80,9 @@ the changes per week (also linked from Settings).
 1. **Choose a list** — big buttons (News, Sports, Test Channels, …)
 2. **Choose a channel** — the channels inside that list (shows "Now"
    from the TV guide if EPG is configured)
+   Movies and Series are shown as a **poster grid** (pictures supplied by
+   your provider, cached in `app/cache/posters`; items without a picture
+   show their title).
 3. **Watching** — full-screen video
 
 ## Changing channels / provider — edit ONE file

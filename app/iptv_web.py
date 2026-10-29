@@ -223,6 +223,23 @@ class ControlServer:
                     else:
                         self._send(404, {"error": "not found"})
                     return
+                if path.startswith("/api/poster/"):
+                    import iptv_stream, iptv_posters
+                    pid = path.rsplit("/", 1)[-1].split(".")[0]
+                    url = iptv_stream.poster_url(pid)
+                    fp = iptv_posters.get_now(url) if url else None
+                    if not fp:
+                        self._send(404, {"error": "no poster"})
+                        return
+                    with open(fp, "rb") as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "max-age=86400")
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 if path == "/api/play/catalog":
                     import iptv_stream
                     try:
@@ -923,6 +940,15 @@ PAGE = r"""<!DOCTYPE html>
             background:var(--bg); padding:.6rem 0; }
   .save { background:var(--accent2); color:#06210f; border:none; padding:.8rem 1.2rem;
           border-radius:10px; font-size:1.05rem; font-weight:700; cursor:pointer; flex:1; }
+  .pgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(104px,1fr)); gap:.6rem; margin-top:.5rem; }
+  .ptile { background:var(--panel,#1e2130); border:2px solid transparent; border-radius:10px; padding:0;
+           color:var(--text); text-align:left; cursor:pointer; overflow:hidden; font-size:.75rem; }
+  .ptile.sel { border-color:var(--accent); }
+  .ptile .pimg { width:100%; aspect-ratio:2/3; background:#0c0e14; display:flex; align-items:center;
+                 justify-content:center; padding:.3rem; text-align:center; font-size:.72rem; color:var(--dim);
+                 overflow:hidden; }
+  .ptile img { width:100%; height:100%; object-fit:cover; display:block; }
+  .ptile .pname { padding:.3rem .4rem; line-height:1.2; max-height:2.5em; overflow:hidden; }
   .ghost { background:none; border:1px solid var(--accent); color:var(--text);
            border-radius:10px; padding:.8rem 1rem; cursor:pointer; }
   .msg { margin-bottom:.8rem; padding:.6rem .8rem; border-radius:8px; display:none; }
@@ -1697,6 +1723,32 @@ function pSelect(label,options,onpick){
   wrap.appendChild(sel);
   return wrap;
 }
+function posterGrid(items,onpick){
+  const wrap=document.createElement('div');
+  let box=null;
+  if(items.length>8){
+    box=document.createElement('input'); box.type='text'; box.placeholder='Filter by name';
+    box.style.marginBottom='.2rem'; wrap.appendChild(box);
+  }
+  const grid=document.createElement('div'); grid.className='pgrid'; wrap.appendChild(grid);
+  const tiles=items.map(it=>{
+    const b=document.createElement('button'); b.className='ptile'; b.type='button';
+    const im=document.createElement('div'); im.className='pimg';
+    if(it.poster){
+      const i=document.createElement('img'); i.loading='lazy'; i.alt=''; i.src='/api/poster/'+it.poster+'.jpg';
+      i.onerror=()=>{ i.remove(); im.textContent=it.name; };
+      im.appendChild(i);
+    }else im.textContent=it.name;
+    const nm=document.createElement('div'); nm.className='pname'; nm.textContent=it.name;
+    b.appendChild(im); b.appendChild(nm);
+    b.onclick=()=>{ tiles.forEach(t=>t.el.classList.remove('sel')); b.classList.add('sel'); onpick(it); };
+    grid.appendChild(b);
+    return {el:b,name:it.name.toLowerCase()};
+  });
+  if(box) box.oninput=()=>{ const q=box.value.trim().toLowerCase();
+    tiles.forEach(t=>t.el.style.display=(!q||t.name.includes(q))?'':'none'); };
+  return wrap;
+}
 async function loadPlay(){
   let d;
   try{ const r=await fetch('/api/play/catalog'); d=await r.json(); }
@@ -1711,14 +1763,13 @@ async function loadPlay(){
   if(!(d.live||[]).length) live.textContent='No live categories added under Settings.';
   const mv=$('pmovies'); mv.innerHTML='';
   if((d.movies||[]).length)
-    mv.appendChild(pSelect('',d.movies.map(m=>({value:m.id,text:m.name})),
-      id=>{ const m=d.movies.find(x=>x.id===id); playItem('movie',id,m.name,m.ext); }));
+    mv.appendChild(posterGrid(d.movies.map(m=>({key:m.id,name:m.name,poster:m.poster,m:m})),
+      it=>playItem('movie',it.m.id,it.m.name,it.m.ext)));
   else mv.textContent='No movies added under Settings.';
   const se=$('pseries'); se.innerHTML=''; $('peps').innerHTML='';
   if((d.series||[]).length){
-    const w=pSelect('',d.series.map(s=>({value:s.sid,text:s.name})),sid=>loadEpisodes(sid));
-    w.querySelector('select').dataset.keep='1';
-    se.appendChild(w);
+    se.appendChild(posterGrid(d.series.map(s=>({key:s.sid,name:s.name,poster:s.poster,s:s})),
+      it=>loadEpisodes(it.s.sid)));
   } else se.textContent='No series added under Settings.';
 }
 async function loadEpisodes(sid){

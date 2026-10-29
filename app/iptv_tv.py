@@ -29,6 +29,7 @@ import iptv_input as ir
 from iptv_web import ControlServer
 from iptv_movies import MovieState
 import iptv_thumbs
+import iptv_posters
 import iptv_net
 import iptv_stream
 
@@ -117,6 +118,7 @@ class App:
         self.thumbs = iptv_thumbs.ThumbScanner()
         self.show_thumbs = False        # thumbnail grid view for current category
         self._thumb_surfaces = {}       # url -> pygame.Surface (loaded lazily)
+        self._poster_surfaces = {}      # (url, w, h) -> scaled poster surface
         self.scan_menu = False          # "rescan all / only new" prompt open
         self.sm_index = 0               # selected item in the scan prompt
         # movie overlay menu state (only used while watching a movie)
@@ -523,6 +525,16 @@ class App:
             if a in (ir.BACK, ir.LEFT):
                 self.screen_state = SCREEN_PLAYLISTS
             return
+        if self.current_playlist.is_movies:
+            r = self._poster_nav(a, self.ch_index, n)
+            if r is None:
+                self.screen_state = SCREEN_PLAYLISTS
+            elif r == "ok":
+                self._grid_play = None
+                self.play_channel(self.ch_index)
+            else:
+                self.ch_index = r
+            return
         # The scan-choice prompt takes priority when open.
         if self.scan_menu:
             self._act_scan_menu(a)
@@ -635,14 +647,33 @@ class App:
             if a in (ir.BACK, ir.LEFT):
                 self.screen_state = SCREEN_PLAYLISTS
             return
-        if a == ir.UP:
-            self.series_index = (self.series_index - 1) % n
-        elif a == ir.DOWN:
-            self.series_index = (self.series_index + 1) % n
-        elif a in (ir.BACK, ir.LEFT):
+        r = self._poster_nav(a, self.series_index, n)
+        if r is None:
             self.screen_state = SCREEN_PLAYLISTS
-        elif a == ir.OK:
+        elif r == "ok":
             self.open_series(self.series_index)
+        else:
+            self.series_index = r
+
+    POSTER_COLS = 6
+
+    def _poster_nav(self, a, i, n):
+        """Move in the poster grid. Returns the new index, "ok", None (leave
+        the grid: Back, or Left on the first column) or i (unchanged)."""
+        cols = self.POSTER_COLS
+        if a == ir.UP:
+            return i - cols if i - cols >= 0 else i
+        if a == ir.DOWN:
+            return min(n - 1, i + cols) if i + cols < n or i // cols < (n - 1) // cols else i
+        if a == ir.LEFT:
+            return None if i % cols == 0 else i - 1
+        if a == ir.RIGHT:
+            return min(n - 1, i + 1)
+        if a == ir.OK:
+            return "ok"
+        if a == ir.BACK:
+            return None
+        return i
 
     def open_series(self, idx):
         # Don't start a second fetch while one is already running (the provider
@@ -1598,11 +1629,12 @@ class App:
         elif self.screen_state == SCREEN_RESUME:
             self._draw_resume()
         elif self.screen_state == SCREEN_SERIES:
-            self._draw_list(self.current_playlist.name,
-                            [s["name"] for s in self.current_playlist.series],
-                            self.series_index,
-                            "OK to open  -  Back to categories",
-                            empty="No series added yet.")
+            self._draw_poster_grid(
+                self.current_playlist.name,
+                [(x["name"], x.get("logo", ""), False)
+                 for x in self.current_playlist.series],
+                self.series_index, "OK to open  -  Back to categories",
+                empty="No series added yet.")
         elif self.screen_state == SCREEN_SEASONS:
             self._draw_list(self.current_series["name"],
                             [s["name"] for s in self.current_seasons],
@@ -1676,6 +1708,102 @@ class App:
             self.surface.blit(t, (left + 28,
                                   y + (row_h - 12) // 2 - t.get_height() // 2))
         self._draw_hint(hint)
+
+    def _poster_surface(self, url, w, h):
+        """Scaled poster for the grid, or None while not downloaded."""
+        if not url or not iptv_posters.has_poster(url):
+            return None
+        key = (url, w, h)
+        surf = self._poster_surfaces.get(key)
+        if surf is None:
+            try:
+                img = pygame.image.load(iptv_posters.poster_path(url)).convert()
+                iw, ih = img.get_size()
+                k = min(w / iw, h / ih)
+                surf = pygame.transform.smoothscale(
+                    img, (max(1, int(iw * k)), max(1, int(ih * k))))
+            except Exception:
+                return None
+            if len(self._poster_surfaces) > 150:
+                self._poster_surfaces.clear()
+            self._poster_surfaces[key] = surf
+        return surf
+
+    def _draw_poster_grid(self, title, entries, sel, hint, empty="Nothing here."):
+        """Grid of posters. entries: [(name, poster_url, watched)]."""
+        self._draw_header(title)
+        n = len(entries)
+        if n == 0:
+            msg = self.f_item.render(empty, True, DIM)
+            self.surface.blit(msg, (int(self.W * 0.06), int(self.H * 0.4)))
+            self._draw_hint(hint)
+            return
+        cols, rows = self.POSTER_COLS, 2
+        left = int(self.W * 0.05)
+        top = int(self.H * 0.16)
+        gap = int(self.W * 0.014)
+        vgap = int(self.H * 0.025)
+        area_w = int(self.W * 0.90)
+        area_h = int(self.H * 0.80) - top
+        label_h = int(self.H * 0.045)
+        cell_h = (area_h - vgap * (rows - 1)) // rows
+        img_h = cell_h - label_h
+        img_w = int(img_h * 2 / 3)
+        if img_w * cols + gap * (cols - 1) > area_w:
+            img_w = (area_w - gap * (cols - 1)) // cols
+            img_h = int(img_w * 3 / 2)
+        total_w = img_w * cols + gap * (cols - 1)
+        left = (self.W - total_w) // 2
+        per_page = cols * rows
+        sel = max(0, min(sel, n - 1))
+        start = (sel // per_page) * per_page
+        # fetch this page and the next one in the background
+        iptv_posters.request([entries[k][1] for k in
+                              range(start, min(n, start + per_page * 2))])
+        for pos in range(start, min(start + per_page, n)):
+            name, logo, watched = entries[pos]
+            rel = pos - start
+            x = left + (rel % cols) * (img_w + gap)
+            y = top + (rel // cols) * (cell_h + vgap)
+            is_sel = (pos == sel)
+            pygame.draw.rect(self.surface, SELECT if is_sel else PANEL,
+                             (x - 4, y - 4, img_w + 8, img_h + label_h + 8),
+                             border_radius=10)
+            tile = pygame.Rect(x, y, img_w, img_h)
+            surf = self._poster_surface(logo, img_w, img_h)
+            if surf is not None:
+                self.surface.blit(surf, (x + (img_w - surf.get_width()) // 2,
+                                         y + (img_h - surf.get_height()) // 2))
+            else:
+                pygame.draw.rect(self.surface, (10, 12, 18), tile, border_radius=8)
+                # text tile: title inside the box while there is no picture
+                words, lines, cur = name.split(), [], ""
+                for wd in words:
+                    t = (cur + " " + wd).strip()
+                    if self.f_grid_label.size(t)[0] <= img_w - 16 or not cur:
+                        cur = t
+                    else:
+                        lines.append(cur)
+                        cur = wd
+                if cur:
+                    lines.append(cur)
+                lh = self.f_grid_label.get_height()
+                yy = y + max(6, (img_h - lh * min(len(lines), 6)) // 2)
+                for ln in lines[:6]:
+                    t = self._fit(self.f_grid_label, ln, DIM, img_w - 12)
+                    self.surface.blit(t, (x + (img_w - t.get_width()) // 2, yy))
+                    yy += lh
+            if watched:
+                pygame.draw.rect(self.surface, ACCENT, tile, width=4,
+                                 border_radius=8)
+            col = SELECT_TEXT if is_sel else (ACCENT if watched else TEXT)
+            t = self._fit(self.f_grid_label, name, col, img_w - 4)
+            self.surface.blit(t, (x + 2, y + img_h + 4))
+        full = self._fit(self.f_item, entries[sel][0], TEXT, self.W * 0.88)
+        self.surface.blit(full, ((self.W - full.get_width()) // 2,
+                                 int(self.H * 0.83)))
+        pages = (n + per_page - 1) // per_page
+        self._draw_hint("%s   (page %d/%d)" % (hint, start // per_page + 1, pages))
 
     def _draw_resume(self):
         self._draw_header(self.current_channel.name)
@@ -2248,8 +2376,15 @@ class App:
         self.surface.blit(hint, (px + 30, py + ph - hint.get_height() - 16))
 
     def _draw_channels_list(self):
-        self._draw_header(self.current_playlist.display_name)
         chans = self.current_playlist.channels
+        if self.current_playlist.is_movies:
+            self._draw_poster_grid(
+                self.current_playlist.display_name,
+                [(c.name, c.logo, self.movies.is_watched(c.url)) for c in chans],
+                self.ch_index, "OK to watch  -  Back to lists",
+                empty="No movies added yet.")
+            return
+        self._draw_header(self.current_playlist.display_name)
         top = int(self.H * 0.18)
         row_h = int(self.H * 0.11)
         visible = max(1, int((self.H * 0.7) // row_h))
@@ -2695,7 +2830,7 @@ class App:
                        self.series_index, self.season_index, self.episode_index,
                        self.current_series["name"] if self.current_series else "",
                        self.current_playlist.name if self.current_playlist else "",
-                       self.show_thumbs,
+                       self.show_thumbs, iptv_posters.version,
                        getattr(self, "_grid_index", 0),
                        self.scan_menu, self.sm_index,
                        self.thumbs.done if self.thumbs.is_scanning() else -1,

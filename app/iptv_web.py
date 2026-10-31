@@ -1165,6 +1165,7 @@ PAGE = r"""<!DOCTYPE html>
         <button class="ghost" id="lpUp" style="flex:1">Upload</button>
         <button class="ghost" id="lpDel" style="flex:1">Remove picture</button>
       </div>
+      <div id="lpMsg" class="pnote" style="min-height:1.2em"></div>
     </div>
 
     <div class="card">
@@ -1744,20 +1745,21 @@ async function loadLivePics(){
 $('lpCat').onchange=()=>{ $('lpFilter').value=''; lpFillChans(); };
 $('lpChan').onchange=lpPreview;
 $('lpFilter').oninput=lpFillChans;
+function lpMsg(ok,t){ const m=$('lpMsg'); m.textContent=t; m.style.color=ok?'var(--oktx)':'var(--errtx)'; }
 $('lpUp').onclick=async()=>{
   const k=lpKey(), f=$('lpFile').files[0];
-  if(!k){ showMsg(false,'Choose a category first.'); return; }
-  if(!f){ showMsg(false,'Choose a picture file first.'); return; }
-  if(f.size>6*1024*1024){ showMsg(false,'The picture must be smaller than 6 MB.'); return; }
+  if(!k){ lpMsg(false,'Choose a category first.'); return; }
+  if(!f){ lpMsg(false,'Choose a picture file first.'); return; }
+  if(f.size>6*1024*1024){ lpMsg(false,'The picture must be smaller than 6 MB.'); return; }
   const r=await fetch('/api/livepic/'+k+'/upload',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:f});
   const j=await r.json().catch(()=>({}));
-  if(r.ok){ showMsg(true,'Picture saved.'); $('lpFile').value=''; await loadLivePics(); }
-  else showMsg(false,j.error||'Upload failed.');
+  if(r.ok){ lpMsg(true,'Picture saved.'); $('lpFile').value=''; await loadLivePics(); }
+  else lpMsg(false,j.error||'Upload failed.');
 };
 $('lpDel').onclick=async()=>{
   const k=lpKey(); if(!k) return;
   const r=await fetch('/api/livepic/'+k+'/delete',{method:'POST'});
-  if(r.ok){ showMsg(true,'Picture removed.'); await loadLivePics(); }
+  if(r.ok){ lpMsg(true,'Picture removed.'); await loadLivePics(); }
 };
 
 // ---- Software updates ----

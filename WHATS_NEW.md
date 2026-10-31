@@ -27,6 +27,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - README points to the QR code on the TV start page for opening the web app.
 
 **Fixed**
+- Starting a channel now stops the picture scan immediately, including a grab already in progress, so it no longer takes the provider's only connection.
 - Desktop "Open in VLC" now downloads an `.m3u` file (the `vlc://` link only works on iOS).
 - VLC/download links work over the VPN (signed token, since VLC has no browser cookie).
 - Neater download-started message on the player page.

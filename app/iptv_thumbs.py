@@ -22,6 +22,20 @@ import re
 _YAVG_RE = re.compile(rb"YAVG=([0-9.]+)")
 
 
+_procs = set()                 # running ffmpeg grabs (killed by ThumbScanner.stop)
+_procs_lock = threading.Lock()
+
+
+def _kill_all():
+    with _procs_lock:
+        procs = list(_procs)
+    for p in procs:
+        try:
+            p.kill()
+        except Exception:
+            pass
+
+
 def _key(url):
     return hashlib.sha1(url.encode("utf-8")).hexdigest()
 
@@ -80,9 +94,21 @@ def _grab_one(url):
     ]
     ok = False
     try:
-        r = subprocess.run(cmd, timeout=GRAB_TIMEOUT,
-                           stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL)
+        with _procs_lock:
+            _procs.add(p)
+        try:
+            try:
+                out_b, _e = p.communicate(timeout=GRAB_TIMEOUT)
+            except subprocess.TimeoutExpired:
+                p.kill()
+                p.communicate()
+                raise
+        finally:
+            with _procs_lock:
+                _procs.discard(p)
+        r = subprocess.CompletedProcess(cmd, p.returncode, out_b, b"")
         got_file = (r.returncode == 0 and os.path.exists(tmp)
                     and os.path.getsize(tmp) > 0)
         if got_file and not _is_black(r.stdout):
@@ -174,3 +200,4 @@ class ThumbScanner:
         self.active = False
         self._gen += 1
         self._thread = None
+        _kill_all()      # free the provider's single connection right away

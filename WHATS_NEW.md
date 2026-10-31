@@ -22,6 +22,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - Movies can be streamed to your phone/computer (Safari player, VLC, download).
 
 **Changed**
+- The picture scan starts each grab a little faster (smaller stream probe).
 - In the dark theme the TV's QR code is now dark too (light squares on a dark background).
 - The picture-scan text now shows which page is being scanned ("Scanning pictures on page 2/21") instead of a channel count.
 - The picture-scan progress ("Scanning pictures 34/208") is now a small text at the bottom left instead of next to the category name.

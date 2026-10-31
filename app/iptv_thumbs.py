@@ -135,6 +135,8 @@ def _grab_one(url):
         "-loglevel", "error",
         "-user_agent", "IPTVPlayer/1.0",
         "-rw_timeout", "3000000",     # 3s I/O timeout (microseconds)
+        "-probesize", "1000000",      # stop probing early (default 5 MB)
+        "-analyzeduration", "1000000",
         "-ss", "1",                    # skip 1s (avoid black lead-in)
         "-i", url,
         "-frames:v", "1",

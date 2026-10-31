@@ -53,6 +53,60 @@ def has_thumb(url):
         return False
 
 
+# ---- attempt log: remembers when each channel was last tried, so channels
+# that gave no picture are not retried within an hour (and an interrupted scan
+# continues where it stopped). Saved to disk so it survives restarts.
+ATTEMPTS_FILE = os.path.join(THUMB_DIR, "attempts.json")
+_attempts = None
+_att_lock = threading.Lock()
+
+
+def _load_attempts():
+    global _attempts
+    if _attempts is None:
+        try:
+            import json
+            with open(ATTEMPTS_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            cut = time.time() - 86400
+            _attempts = {k: v for k, v in data.items() if v > cut}
+        except Exception:
+            _attempts = {}
+    return _attempts
+
+
+def save_attempts():
+    with _att_lock:
+        data = dict(_load_attempts())
+    try:
+        import json
+        os.makedirs(THUMB_DIR, exist_ok=True)
+        tmp = ATTEMPTS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, ATTEMPTS_FILE)
+    except Exception:
+        pass
+
+
+def record_attempt(url):
+    with _att_lock:
+        _load_attempts()[_key(url)] = time.time()
+
+
+def recently_tried(url, max_age=MAX_AGE):
+    """True if a grab for this channel finished less than max_age ago."""
+    with _att_lock:
+        t = _load_attempts().get(_key(url))
+    return bool(t) and (time.time() - t) < max_age
+
+
+def needs_scan(url):
+    """A channel is scanned if it has no fresh picture AND was not tried
+    within the last hour."""
+    return not thumb_fresh(url) and not recently_tried(url)
+
+
 def thumb_fresh(url, max_age=MAX_AGE):
     """True if a thumbnail exists AND is younger than max_age seconds."""
     p = thumb_path(url)
@@ -163,7 +217,7 @@ class ThumbScanner:
         # Make sure any previous scan is fully stopped before starting a new
         # one, otherwise the old thread could keep running in the background.
         self.stop()
-        todo = [u for u in urls if u and (force or not thumb_fresh(u))]
+        todo = [u for u in urls if u and (force or needs_scan(u))]
         self.total = len(todo)
         self.done = 0
         self._stop.clear()
@@ -180,9 +234,13 @@ class ThumbScanner:
                 _grab_one(u)
                 # re-check after the (slow) grab: a stop()/new scan may have
                 # happened while we were fetching, so don't touch shared state.
-                if gen != self._gen:
-                    break
+                if gen != self._gen or self._stop.is_set():
+                    break           # interrupted: not a real attempt
+                record_attempt(u)
                 self.done += 1
+                if self.done % 10 == 0:
+                    save_attempts()
+            save_attempts()
             # only clear active if we're still the current generation
             if gen == self._gen:
                 self.active = False

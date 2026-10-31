@@ -19,6 +19,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - Movies can be streamed to your phone/computer (Safari player, VLC, download).
 
 **Changed**
+- The picture-scan progress ("Scanning pictures 34/208") is now a small text at the bottom left instead of next to the category name.
 - Opening a live category now automatically refreshes only old or missing channel pictures.
 - Cleaner TV pages: no selected-title line, no caption under the QR code and no hint text at the bottom; only a small "1/3" page number with an arrow in the bottom right corner when there is more than one page.
 - The TV pages no longer show a "Live/Movies/Series" heading (the left menu already shows it).
@@ -28,6 +29,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - README points to the QR code on the TV start page for opening the web app.
 
 **Fixed**
+- The picture scan no longer retries channels that gave no picture within the last hour, and an interrupted scan continues where it stopped.
 - A live stream that fails to start or stops (black screen) is now retried automatically up to three times, then the box returns to the channel list with a message.
 - After watching a live channel, going back to the picture grid continues the picture scan where it stopped.
 - Starting a channel now stops the picture scan immediately, including a grab already in progress, so it no longer takes the provider's only connection.

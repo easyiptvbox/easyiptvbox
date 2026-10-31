@@ -678,7 +678,7 @@ class App:
         # pictures don't linger: all of them for "Rescan all", only the old
         # (> 1 hour) ones otherwise - fresh ones are kept and skipped.
         for u in urls:
-            if force or not iptv_thumbs.thumb_fresh(u):
+            if force or iptv_thumbs.needs_scan(u):
                 try:
                     os.remove(iptv_thumbs.thumb_path(u))
                 except OSError:
@@ -1856,10 +1856,13 @@ class App:
         """Grid of tiles. get(i) -> (name, picture, watched); picture is a
         provider URL, a local file path or ''. Colored/dark text tile when
         there is no picture."""
-        head = (title + (("   " + subtitle) if title and subtitle else subtitle)
-                ).strip()
+        head = title.strip()
         if head:
             self._draw_header(head, font=self.f_grid_header)
+        if subtitle:     # status text, bottom left (e.g. picture scan progress)
+            st = self._fit(self.f_hint, subtitle, DIM, (self.W - self._ox) * 0.6)
+            self.surface.blit(st, (self._ox + int(self.W * 0.03),
+                                   self.H - st.get_height() - 20))
         left0 = self._ox
         avail_w = self.W - left0
         if n == 0:
@@ -2469,7 +2472,7 @@ class App:
         chans = self.current_playlist.channels
         sub = ""
         if self.thumbs.is_scanning():
-            sub = "(scanning %d/%d)" % (self.thumbs.done, self.thumbs.total)
+            sub = "Scanning pictures %d/%d" % (self.thumbs.done, self.thumbs.total)
 
         def get(k):
             c = chans[k]

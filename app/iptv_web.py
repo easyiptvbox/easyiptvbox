@@ -2062,7 +2062,7 @@ function profPicture(p){
 async function afterProfileChange(){
   await loadProfiles();
   await loadForm();
-  loadLivePics(); loadPlay();
+  loadLivePics(); loadPlay(); loadWatches();
 }
 async function profSelect(id){
   const p=PROFS.find(x=>x.id===id); if(!p) return;

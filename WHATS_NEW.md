@@ -37,6 +37,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - README points to the QR code on the TV start page for opening the web app.
 
 **Fixed**
+- Saved searches ("add future results automatically") now show the selected profile's own list; after switching profiles the web app kept showing the previous profile's searches.
 - Settings autosave could overwrite your categories with an empty list if the page was hidden before it finished loading. It now waits until the settings are loaded, the box refuses a save that would remove all categories, and the last 10 versions of the config are kept as dated backups.
 - "Play on TV" no longer says "Another device is streaming" because of the web page's own preview: it now stops the preview first and takes over.
 - The picture scan no longer retries channels that gave no picture within the last hour, and an interrupted scan continues where it stopped.

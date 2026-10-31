@@ -672,7 +672,7 @@ class App:
             self.show_thumbs = True
             self._start_thumb_scan(force=force)
 
-    def _start_thumb_scan(self, force=False):
+    def _start_thumb_scan(self, force=False, quiet=False):
         urls = [c.url for c in self.current_playlist.channels]
         # Remove the thumbnails that will be re-grabbed first, so stale
         # pictures don't linger: all of them for "Rescan all", only the old
@@ -685,6 +685,8 @@ class App:
                     pass
         self._thumb_surfaces = {}
         self.thumbs.start(urls, force=force)
+        if quiet:
+            return
         if self.thumbs.total > 0:
             self.notify("Scanning %d channels..." % self.thumbs.total, 3)
         else:
@@ -1564,6 +1566,9 @@ class App:
             self.screen_state = SCREEN_SERIES
         else:
             self.screen_state = SCREEN_CHANNELS
+            if self.show_thumbs and self.current_playlist.channels:
+                # live category: refresh only old / missing pictures
+                self._start_thumb_scan(force=False, quiet=True)
 
     def _is_live_category(self):
         pl = self.current_playlist

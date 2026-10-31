@@ -921,10 +921,19 @@ PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<script>(function(){var t=localStorage.getItem("theme")||"auto";if(t==="auto")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t;})();</script>
 <title>TV Remote</title>
 <style>
   :root { --bg:#12141c; --panel:#1e2130; --accent:#007acc; --accent2:#5ac878;
-          --text:#e1e4eb; --dim:#8a90a0; }
+          --text:#e1e4eb; --dim:#8a90a0; --line:#2a2e40; --panel2:#161925;
+          --field:#0d0f16; --tilebg:#0c0e14; --btn2:#3a3f50; --code:#d6f5c6;
+          --errbg:#3d1212; --errtx:#e88; --okbg:#123d22; --oktx:#8fe3a8; --okbg2:#2a4d33; }
+  :root[data-theme="light"] { --bg:#f3f5f9; --panel:#ffffff; --accent:#0069b4; --accent2:#2e9e57;
+          --text:#1c2230; --dim:#5d6578; --line:#cfd5e1; --panel2:#eef1f6;
+          --field:#ffffff; --tilebg:#e3e7ef; --btn2:#d5dae5; --code:#14532d;
+          --errbg:#fde4e4; --errtx:#a12020; --okbg:#dcf4e4; --oktx:#17652f; --okbg2:#cfeedb; }
+  :root[data-theme="light"] .tab.active { color:#fff; }
+  :root[data-theme="light"] .pimg .ptxt { text-shadow:0 1px 2px #0008; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   body { margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
          background:var(--bg); color:var(--text); }
@@ -962,24 +971,24 @@ PAGE = r"""<!DOCTYPE html>
   .card h2 { margin:0 0 .8rem; font-size:1.05rem; }
   .card h2 a.hl { color:inherit; text-decoration:none; }
   .card h2 .hi { display:inline-block; width:1.2em; height:1.2em; line-height:1.2em;
-                 text-align:center; border-radius:50%; background:#3a3f50;
+                 text-align:center; border-radius:50%; background:var(--btn2);
                  color:var(--text); font-size:.75em; vertical-align:middle; }
   .pbtn { display:block; text-align:center; padding:.85rem; border-radius:10px;
           background:#ff8800; color:#000; font-weight:600; text-decoration:none;
           margin:.6rem 0 0; }
-  .pbtn.alt { background:#3a3f50; color:var(--text); }
+  .pbtn.alt { background:var(--btn2); color:var(--text); }
   .pnote { color:var(--dim); font-size:.82rem; line-height:1.4; margin:.6rem 0 0; }
   label { display:block; font-size:.85rem; color:var(--dim); margin:.6rem 0 .2rem; }
   input[type=text], input[type=url], input[type=password], input[type=number],
   select {
-    width:100%; background:#0d0f16; color:var(--text); border:1px solid #2a2e40;
+    width:100%; background:var(--field); color:var(--text); border:1px solid var(--line);
     border-radius:8px; padding:.55rem .6rem; font-size:1rem; }
   .checkline { display:flex; align-items:center; gap:.5rem; margin:.6rem 0; }
   .checkline input { width:1.2rem; height:1.2rem; }
   .checkline label { margin:0; color:var(--text); font-size:1rem; }
-  .chan, .pl { border:1px solid #2a2e40; border-radius:10px; padding:.7rem;
+  .chan, .pl { border:1px solid var(--line); border-radius:10px; padding:.7rem;
                margin:.6rem 0; }
-  .chan { background:#161925; }
+  .chan { background:var(--panel2); }
   .plhead { display:flex; gap:.5rem; align-items:center; }
   .plhead input { flex:1; font-weight:700; }
   .minirow { display:flex; gap:.5rem; }
@@ -987,7 +996,7 @@ PAGE = r"""<!DOCTYPE html>
   .addbtn { background:none; border:1px dashed var(--accent); color:var(--text);
             padding:.55rem; border-radius:8px; width:100%; cursor:pointer;
             font-size:.95rem; margin-top:.4rem; }
-  .del { background:#3d1212; border:none; color:#e88; border-radius:8px;
+  .del { background:var(--errbg); border:none; color:var(--errtx); border-radius:8px;
          padding:.4rem .7rem; cursor:pointer; font-size:.85rem; }
   .cfgbar { display:flex; gap:.6rem; margin:1rem 0; position:sticky; bottom:0;
             background:var(--bg); padding:.6rem 0; }
@@ -1000,7 +1009,7 @@ PAGE = r"""<!DOCTYPE html>
   .pgrid.wide .pimg { aspect-ratio:16/9; padding:0; }
   .pimg .ptxt { color:#fff; font-size:.8rem; padding:.3rem; }
   .ptile.sel { border-color:var(--accent); }
-  .ptile .pimg { width:100%; aspect-ratio:2/3; background:#0c0e14; display:flex; align-items:center;
+  .ptile .pimg { width:100%; aspect-ratio:2/3; background:var(--tilebg); display:flex; align-items:center;
                  justify-content:center; padding:.3rem; text-align:center; font-size:.72rem; color:var(--dim);
                  overflow:hidden; }
   .ptile img { width:100%; height:100%; object-fit:cover; display:block; }
@@ -1008,21 +1017,21 @@ PAGE = r"""<!DOCTYPE html>
   .ghost { background:none; border:1px solid var(--accent); color:var(--text);
            border-radius:10px; padding:.8rem 1rem; cursor:pointer; }
   .msg { margin-bottom:.8rem; padding:.6rem .8rem; border-radius:8px; display:none; }
-  .msg.ok { background:#123d22; color:#8fe3a8; display:block; }
-  .msg.err { background:#3d1212; color:#e88; display:block; white-space:pre-wrap; }
+  .msg.ok { background:var(--okbg); color:var(--oktx); display:block; }
+  .msg.err { background:var(--errbg); color:var(--errtx); display:block; white-space:pre-wrap; }
   details.raw summary { color:var(--dim); cursor:pointer; margin-top:1rem; }
   .sr { display:flex; align-items:center; gap:.5rem; padding:.5rem;
-        border:1px solid #2a2e40; border-radius:8px; margin:.35rem 0;
-        background:#161925; }
+        border:1px solid var(--line); border-radius:8px; margin:.35rem 0;
+        background:var(--panel2); }
   .sr .nm { flex:1; font-size:.95rem; overflow:hidden; text-overflow:ellipsis;
             white-space:nowrap; }
   .sr .grp { color:var(--dim); font-size:.72rem; }
   .sr .add { background:var(--accent2); color:#06210f; border:none;
              border-radius:8px; padding:.4rem .8rem; cursor:pointer;
              font-weight:700; flex:0 0 auto; }
-  .sr .add.done { background:#2a4d33; color:#8fe3a8; }
-  textarea { width:100%; height:40vh; background:#0d0f16; color:#d6f5c6;
-             border:1px solid #2a2e40; border-radius:10px; padding:.8rem;
+  .sr .add.done { background:var(--okbg2); color:var(--oktx); }
+  textarea { width:100%; height:40vh; background:var(--field); color:var(--code);
+             border:1px solid var(--line); border-radius:10px; padding:.8rem;
              font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.85rem;
              margin-top:.5rem; }
 </style>
@@ -1093,7 +1102,7 @@ PAGE = r"""<!DOCTYPE html>
 
   <section id="config">
     <p style="margin:0 0 .6rem;color:var(--dim);font-size:.85rem">Tap a section title for help, or
-      <a href="/help" target="_blank" rel="noopener" style="color:#5fb3ff">read all instructions</a>.</p>
+      <a href="/help" target="_blank" rel="noopener" style="color:var(--accent)">read all instructions</a>.</p>
     <div class="msg" id="msg"></div>
 
     <div class="card" id="movieCard">
@@ -1145,7 +1154,7 @@ PAGE = r"""<!DOCTYPE html>
       <input type="text" id="lpFilter" placeholder="Filter channels by name" style="margin-bottom:.3rem">
       <select id="lpChan"></select>
       <div style="display:flex;gap:.8rem;align-items:center;margin-top:.7rem">
-        <div id="lpPrev" style="width:160px;height:90px;border-radius:8px;background:#0c0e14;
+        <div id="lpPrev" style="width:160px;height:90px;border-radius:8px;background:var(--tilebg);
              display:flex;align-items:center;justify-content:center;color:var(--dim);
              font-size:.75rem;overflow:hidden;text-align:center">no picture</div>
         <div style="flex:1">
@@ -1183,6 +1192,12 @@ PAGE = r"""<!DOCTYPE html>
         <option value="normal">Normal</option>
         <option value="large">Large</option>
         <option value="extra_large">Extra large</option>
+      </select>
+      <label>Appearance (this device)</label>
+      <select id="themeSel">
+        <option value="auto">Automatic (follow the device)</option>
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
       </select>
     </div>
 
@@ -1683,6 +1698,15 @@ $('wifiSetupBtn').onclick=async()=>{
   showMsg(true,'Look at the TV to finish Wi-Fi setup.');
 };
 loadRemotes();
+
+// ---- Theme ----
+function applyTheme(t){
+  localStorage.setItem('theme',t);
+  if(t==='auto') t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
+  document.documentElement.dataset.theme=t;
+}
+$('themeSel').value=localStorage.getItem('theme')||'auto';
+$('themeSel').onchange=()=>applyTheme($('themeSel').value);
 
 // ---- Live thumbnails ----
 let LP={live:[],have:new Set()};

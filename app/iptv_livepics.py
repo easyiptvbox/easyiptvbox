@@ -12,7 +12,11 @@ import threading
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.environ.get("IPTV_CACHE", os.path.join(APP_DIR, "cache"))
-PIC_DIR = os.path.join(CACHE_DIR, "livepics")
+import iptv_profiles
+
+
+def _pic_dir():
+    return iptv_profiles.pic_dir()
 
 PIC_W, PIC_H = 480, 270
 MAX_UPLOAD = 6 * 1024 * 1024
@@ -52,7 +56,7 @@ def color_for(name):
 def path_for(key):
     if not KEY_RE.match(key or ""):
         return None
-    return os.path.join(PIC_DIR, key + ".jpg")
+    return os.path.join(_pic_dir(), key + ".jpg")
 
 
 def find(key):
@@ -68,7 +72,7 @@ def find(key):
 
 def keys():
     try:
-        return sorted(f[:-4] for f in os.listdir(PIC_DIR)
+        return sorted(f[:-4] for f in os.listdir(_pic_dir())
                       if f.endswith(".jpg") and KEY_RE.match(f[:-4]))
     except OSError:
         return []
@@ -90,7 +94,7 @@ def save(key, data):
         raise ValueError("That file is not a usable picture (use JPG or PNG)")
     im = ImageOps.fit(im, (PIC_W, PIC_H), Image.LANCZOS)
     with _lock:
-        os.makedirs(PIC_DIR, exist_ok=True)
+        os.makedirs(_pic_dir(), exist_ok=True)
         if not os.path.exists(p) and len(keys()) >= MAX_FILES:
             raise ValueError("Too many pictures; remove some first")
         tmp = p + ".tmp"
@@ -110,6 +114,6 @@ def delete(key):
 def dir_stamp():
     """Changes whenever a picture is added, replaced or removed."""
     try:
-        return os.stat(PIC_DIR).st_mtime_ns
+        return os.stat(_pic_dir()).st_mtime_ns
     except OSError:
         return 0

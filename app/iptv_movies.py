@@ -8,14 +8,18 @@ import threading
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.environ.get("IPTV_CACHE", os.path.join(APP_DIR, "cache"))
-STATE_PATH = os.path.join(CACHE_DIR, "movie_state.json")
+import iptv_profiles
+
+
+def _state_path():
+    return os.path.join(iptv_profiles.state_dir(), "movie_state.json")
 
 _lock = threading.Lock()
 
 
 def _load():
     try:
-        with open(STATE_PATH, "r", encoding="utf-8") as f:
+        with open(_state_path(), "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return {}
@@ -23,11 +27,11 @@ def _load():
 
 def _save(data):
     try:
-        os.makedirs(CACHE_DIR, exist_ok=True)
-        tmp = STATE_PATH + ".tmp"
+        os.makedirs(os.path.dirname(_state_path()), exist_ok=True)
+        tmp = _state_path() + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f)
-        os.replace(tmp, STATE_PATH)
+        os.replace(tmp, _state_path())
     except Exception:
         pass
 

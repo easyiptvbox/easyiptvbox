@@ -31,15 +31,16 @@ from iptv_movies import MovieState
 import iptv_thumbs
 import iptv_posters
 import iptv_livepics
+import iptv_profiles
 import iptv_net
 import iptv_stream
 
 MENU_SCREENS = ("playlists", "channels", "series")   # screens with the left menu
 SECTIONS = ("movies", "live", "series")
 SECTION_LABELS = {"live": "Live", "movies": "Movies", "series": "Series"}
-UI_STATE_PATH = os.path.join(
-    os.environ.get("IPTV_CACHE", os.path.join(os.path.dirname(
-        os.path.abspath(__file__)), "cache")), "ui_state.json")
+def _ui_state_path():
+    return os.path.join(iptv_profiles.state_dir(), "ui_state.json")
+
 
 WEB_PORT = int(os.environ.get("IPTV_WEB_PORT", "8080"))
 
@@ -123,6 +124,7 @@ SCREEN_LEARN = "learn"       # IR remote learning wizard
 SCREEN_WIFI_LIST = "wifi_list"      # pick a Wi-Fi network
 SCREEN_WIFI_KEYBOARD = "wifi_kbd"   # on-screen keyboard for the password
 SCREEN_WIFI_CONNECT = "wifi_connect"  # connecting / result
+SCREEN_PIN = "pin"           # numeric PIN pad to open a protected profile
 
 
 class App:
@@ -139,6 +141,12 @@ class App:
         self.pl_index = 0          # selected playlist
         self._ox = 0               # left offset of the content (menu width)
         self.menu_focus = False    # keyboard focus is in the left menu
+        self.menu_prof = None      # highlighted profile row in the menu
+        self._loaded_profile = iptv_profiles.ACTIVE
+        self._pin_target = None
+        self._pin_buf = ""
+        self._pin_idx = 4
+        self._pin_msg = ""
         self.live_sel = 0          # selected live category tile
         self.section = self._load_ui_state()
         self.ch_index = 0          # selected channel
@@ -447,7 +455,12 @@ class App:
                 # saved searches: add any new matches from the fresh lists
                 try:
                     import iptv_watch
-                    iptv_watch.check()
+                    for pid in iptv_profiles.ids():
+                        iptv_profiles.set_request(pid)
+                        try:
+                            iptv_watch.check()
+                        finally:
+                            iptv_profiles.clear_request()
                 except Exception as e:
                     print("saved search check failed: %s" % e, flush=True)
                 # re-expand categories/series from the fresh caches
@@ -508,6 +521,9 @@ class App:
             self.screen_state = SCREEN_POWER   # any key: back to the menu
             self._last_sig = None
             return
+        if self.screen_state == SCREEN_PIN:
+            self._act_pin(a)
+            return
         if self.screen_state in MENU_SCREENS:
             self._normalize_home()
             if self.menu_focus:
@@ -546,7 +562,7 @@ class App:
     def _load_ui_state(self):
         try:
             import json
-            with open(UI_STATE_PATH, "r", encoding="utf-8") as f:
+            with open(_ui_state_path(), "r", encoding="utf-8") as f:
                 sec = json.load(f).get("section")
             if sec in SECTIONS:
                 return sec
@@ -557,11 +573,11 @@ class App:
     def _save_ui_state(self):
         try:
             import json
-            os.makedirs(os.path.dirname(UI_STATE_PATH), exist_ok=True)
-            tmp = UI_STATE_PATH + ".tmp"
+            os.makedirs(os.path.dirname(_ui_state_path()), exist_ok=True)
+            tmp = _ui_state_path() + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump({"section": self.section}, f)
-            os.replace(tmp, UI_STATE_PATH)
+            os.replace(tmp, _ui_state_path())
         except Exception:
             pass
 
@@ -603,17 +619,129 @@ class App:
         if self.screen_state == SCREEN_PLAYLISTS and self.section != "live":
             self._enter_section()
 
+    def _menu_profiles(self):
+        """Profiles shown above the QR code (only once an extra exists)."""
+        if iptv_profiles.extra_count() <= 0:
+            return []
+        return iptv_profiles.list_profiles()
+
     def _act_menu(self, a):
-        k = SECTIONS.index(self.section)
+        profs = self._menu_profiles()
+        if self.menu_prof is not None and self.menu_prof >= len(profs):
+            self.menu_prof = None
+        ns = len(SECTIONS)
         if a in (ir.UP, ir.DOWN):
-            k = (k + (1 if a == ir.DOWN else -1)) % len(SECTIONS)
-            self.section = SECTIONS[k]
-            self._save_ui_state()
-            self._enter_section()
+            pos = (ns + self.menu_prof) if self.menu_prof is not None \
+                else SECTIONS.index(self.section)
+            pos = (pos + (1 if a == ir.DOWN else -1)) % (ns + len(profs))
+            if pos < ns:
+                self.menu_prof = None
+                self.section = SECTIONS[pos]
+                self._save_ui_state()
+                self._enter_section()
+            else:
+                self.menu_prof = pos - ns       # highlight only; OK switches
+        elif a == ir.OK and self.menu_prof is not None:
+            self._pick_profile(profs[self.menu_prof])
         elif a in (ir.OK, ir.RIGHT):
+            self.menu_prof = None
             self.menu_focus = False
         elif a in (ir.BACK, ir.MENU, ir.HOME):
             self.open_power_menu()
+
+    # -- profiles ------------------------------------------------------------
+    def _pick_profile(self, p):
+        if p["id"] == iptv_profiles.ACTIVE:
+            self.menu_prof = None
+            self.notify("Already using %s" % p["name"], 2)
+            return
+        if p["has_pin"]:
+            self._pin_target = p
+            self._pin_buf = ""
+            self._pin_idx = 4
+            self._pin_msg = ""
+            self.screen_state = SCREEN_PIN
+            return
+        self._switch_profile(p["id"])
+
+    def _switch_profile(self, pid):
+        if not iptv_profiles.exists(pid):
+            return
+        iptv_profiles.ACTIVE = pid
+        self._apply_profile()
+        self.notify("Profile: %s" % iptv_profiles.name_of(pid), 3)
+
+    def _apply_profile(self):
+        """Load the active profile's settings, categories and watch state."""
+        self.thumbs.stop()
+        if self.player.is_running():
+            self.player.stop()
+            self._acquire_display()
+        self._loaded_profile = iptv_profiles.ACTIVE
+        try:
+            self.cfg = load_config()
+        except Exception as e:
+            self.notify("Profile error: %s" % e, 5)
+            return
+        set_theme(self.cfg.theme)
+        self._load_fonts()
+        self.movies = MovieState()
+        self._movie_url = None
+        self.movie_menu = None
+        self._poster_surfaces = {}
+        self._thumb_surfaces = {}
+        self.current_playlist = None
+        self.current_series = None
+        self.current_channel = None
+        self.live_sel = self.ch_index = self.series_index = 0
+        self.menu_prof = None
+        self.menu_focus = True
+        self.section = self._load_ui_state()
+        self._enter_section()
+        self._last_sig = None
+
+    PIN_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "<", "0", "OK"]
+
+    def _act_pin(self, a):
+        i = self._pin_idx
+        if a == ir.UP and i >= 3:
+            self._pin_idx = i - 3
+        elif a == ir.DOWN and i <= 8:
+            self._pin_idx = i + 3
+        elif a == ir.LEFT and i % 3 > 0:
+            self._pin_idx = i - 1
+        elif a == ir.RIGHT and i % 3 < 2:
+            self._pin_idx = i + 1
+        elif a == ir.BACK:
+            self.screen_state = SCREEN_PLAYLISTS
+            self._enter_section()
+        elif a == ir.OK:
+            k = self.PIN_KEYS[i]
+            self._pin_msg = ""
+            if k == "<":
+                self._pin_buf = self._pin_buf[:-1]
+            elif k == "OK":
+                self._submit_pin()
+            elif len(self._pin_buf) < 6:
+                self._pin_buf += k
+
+    def _submit_pin(self):
+        p = self._pin_target
+        if len(self._pin_buf) < 4:
+            self._pin_msg = "The PIN has 4 to 6 digits"
+            return
+        try:
+            ok = iptv_profiles.check_pin(p["id"], self._pin_buf)
+        except PermissionError as e:
+            self._pin_buf = ""
+            self._pin_msg = str(e)
+            return
+        self._pin_buf = ""
+        if not ok:
+            self._pin_msg = "Wrong PIN"
+            return
+        self.screen_state = SCREEN_PLAYLISTS
+        self._switch_profile(p["id"])
 
     def _act_playlists(self, a):
         """Live section: grid of category tiles."""
@@ -1637,6 +1765,9 @@ class App:
             return
         if self.screen_state == SCREEN_PLAYING and self.is_movie_playing():
             self._save_movie_position()
+        want = req.get("profile") or iptv_profiles.DEFAULT
+        if want != iptv_profiles.ACTIVE and iptv_profiles.exists(want):
+            self._switch_profile(want)          # the web app already checked the PIN
         self._force_play = True
         try:
             self._play_on_tv_inner(req)
@@ -1872,6 +2003,8 @@ class App:
             self._draw_wifi_list()
         elif self.screen_state == SCREEN_WIFI_KEYBOARD:
             self._draw_wifi_keyboard()
+        elif self.screen_state == SCREEN_PIN:
+            self._draw_pin()
         elif self.screen_state == SCREEN_WIFI_CONNECT:
             self._draw_wifi_connect()
         self._draw_message()
@@ -2466,6 +2599,7 @@ class App:
         # QR code at the bottom of the menu
         qr_px = mw - 4 * pad
         qy = self.H - 24 - qr_px - 6
+        self._draw_menu_profiles(pad, mw, y + int(self.H * 0.01), qy - 14)
         surf = self._qr_surface(qr_px)
         if surf is not None:
             qx = (mw - qr_px) // 2
@@ -2475,6 +2609,121 @@ class App:
             self.surface.blit(pygame.transform.scale(surf, (qr_px, qr_px)),
                               (qx, qy))
         self._ox = mw
+
+    def _draw_avatar(self, cx, cy, r, p):
+        """Round profile picture (or a colored circle with the initial)."""
+        key = ("av", p["id"], r)
+        path = iptv_profiles.avatar_path(p["id"])
+        try:
+            mt = os.path.getmtime(path) if p["has_pic"] else 0
+        except OSError:
+            mt = 0
+        hit = self._poster_surfaces.get(key)
+        if not hit or hit[0] != mt:
+            d = 2 * r
+            surf = pygame.Surface((d, d), pygame.SRCALPHA)
+            img = None
+            if mt:
+                try:
+                    img = pygame.transform.smoothscale(
+                        pygame.image.load(path).convert(), (d, d))
+                except Exception:
+                    img = None
+            if img is None:
+                pygame.draw.circle(surf, iptv_profiles.initial_color(p["name"]),
+                                   (r, r), r)
+                ini = self.f_small.render(p["name"][:1].upper(), True,
+                                          (255, 255, 255))
+                surf.blit(ini, (r - ini.get_width() // 2,
+                                r - ini.get_height() // 2))
+            else:
+                mask = pygame.Surface((d, d), pygame.SRCALPHA)
+                pygame.draw.circle(mask, (255, 255, 255, 255), (r, r), r)
+                img = img.convert_alpha()
+                img.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MIN)
+                surf = img
+            hit = (mt, surf)
+            self._poster_surfaces[key] = hit
+        self.surface.blit(hit[1], (cx - r, cy - r))
+
+    def _draw_menu_profiles(self, pad, mw, top, bottom):
+        """Profiles in the menu, just above the QR code (a few rows; the list
+        scrolls when there are more)."""
+        profs = self._menu_profiles()
+        if not profs or bottom - top < 40:
+            return
+        ph = int(self.H * 0.07)
+        vis = max(1, min(len(profs), (bottom - top) // ph))
+        act = iptv_profiles.ACTIVE
+        sel = self.menu_prof if self.menu_prof is not None else next(
+            (i for i, p in enumerate(profs) if p["id"] == act), 0)
+        start = max(0, min(sel - vis // 2, len(profs) - vis))
+        y = bottom - vis * ph          # stick to the QR code
+        for i in range(start, start + vis):
+            p = profs[i]
+            focus = self.menu_focus and self.menu_prof == i
+            rect = (pad, y, mw - 2 * pad, ph - 6)
+            if focus:
+                pygame.draw.rect(self.surface, SELECT, rect, border_radius=12)
+            elif p["id"] == act:
+                pygame.draw.rect(self.surface, PANEL, rect, border_radius=12)
+                pygame.draw.rect(self.surface, SELECT,
+                                 (pad, y + 8, 6, ph - 22), border_radius=3)
+            r = (ph - 6) // 2 - 6
+            self._draw_avatar(pad + 20 + r, y + (ph - 6) // 2, r, p)
+            nm = p["name"] + (" *" if p["has_pin"] else "")
+            tcol = SELECT_TEXT if focus else (TEXT if p["id"] == act else DIM)
+            s = self._fit(self.f_hint, nm, tcol, mw - 2 * pad - 2 * r - 52)
+            self.surface.blit(s, (pad + 30 + 2 * r,
+                                  y + (ph - 6) // 2 - s.get_height() // 2))
+            y += ph
+        # scroll hints
+        ax = mw - pad - 14
+        if start > 0:
+            pygame.draw.polygon(self.surface, DIM, [(ax - 6, bottom - vis * ph + 12),
+                                (ax + 6, bottom - vis * ph + 12),
+                                (ax, bottom - vis * ph + 4)])
+        if start + vis < len(profs):
+            pygame.draw.polygon(self.surface, DIM, [(ax - 6, bottom - 12),
+                                (ax + 6, bottom - 12), (ax, bottom - 4)])
+
+    def _draw_pin(self):
+        p = self._pin_target or {"id": "", "name": "", "has_pic": False}
+        cx = self.W // 2
+        self._draw_avatar(cx, int(self.H * 0.15), int(self.H * 0.07), p)
+        t = self.f_item.render(p["name"], True, TEXT)
+        self.surface.blit(t, (cx - t.get_width() // 2, int(self.H * 0.24)))
+        # dots
+        n = len(self._pin_buf)
+        dot_r = int(self.H * 0.012)
+        gap = dot_r * 4
+        x0 = cx - (6 * gap) // 2 + gap // 2
+        for k in range(6):
+            pos = (x0 + k * gap, int(self.H * 0.345))
+            if k < n:
+                pygame.draw.circle(self.surface, TEXT, pos, dot_r)
+            else:
+                pygame.draw.circle(self.surface, DIM, pos, dot_r, 2)
+        # keypad
+        bw, bh = int(self.W * 0.075), int(self.H * 0.09)
+        g = int(self.H * 0.015)
+        left = cx - (3 * bw + 2 * g) // 2
+        top = int(self.H * 0.39)
+        for k, label in enumerate(self.PIN_KEYS):
+            x = left + (k % 3) * (bw + g)
+            y = top + (k // 3) * (bh + g)
+            sel = (k == self._pin_idx)
+            pygame.draw.rect(self.surface, SELECT if sel else PANEL,
+                             (x, y, bw, bh), border_radius=12)
+            lab = {"<": "<-"}.get(label, label)
+            s = self.f_item.render(lab, True, SELECT_TEXT if sel else TEXT)
+            self.surface.blit(s, (x + (bw - s.get_width()) // 2,
+                                  y + (bh - s.get_height()) // 2))
+        if self._pin_msg:
+            m = self.f_small.render(self._pin_msg, True, (230, 120, 110))
+            self.surface.blit(m, (cx - m.get_width() // 2, int(self.H * 0.88)))
+        else:
+            self._draw_hint("Arrows and OK to enter the PIN, then OK on OK  -  Back to cancel")
 
     def _draw_playlists(self):
         """Live section: tiles for the live categories."""
@@ -2925,6 +3174,10 @@ class App:
                 self._save_movie_position()
                 self._last_saved_pos = time.time()
 
+            if iptv_profiles.ACTIVE != self._loaded_profile and \
+                    self.screen_state != SCREEN_PLAYING:
+                self._apply_profile()
+
             if getattr(self, "_reload_pending", False) and \
                     self.screen_state not in (SCREEN_PLAYING, SCREEN_LEARN,
                                               SCREEN_WIFI_LIST,
@@ -3029,6 +3282,9 @@ class App:
                        self.current_playlist.name if self.current_playlist else "",
                        self.show_thumbs, iptv_posters.version,
                        self.section, self.menu_focus, self.live_sel,
+                       self.menu_prof, iptv_profiles.ACTIVE,
+                       iptv_profiles.extra_count(), self._pin_idx,
+                       len(self._pin_buf), self._pin_msg,
                        iptv_livepics.dir_stamp(),
                        getattr(self, "_grid_index", 0),
                        self.scan_menu, self.sm_index,

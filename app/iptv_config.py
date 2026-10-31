@@ -161,9 +161,15 @@ class Config:
         return self.playlists
 
 
-def load_config(path=CONFIG_PATH):
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+def load_config(path=None):
+    """Load the config for the active profile (TV) or the profile of the
+    current web request."""
+    if path is None:
+        import iptv_profiles
+        data = iptv_profiles.read_config_data()
+    else:
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
     cfg = Config(data)
     cfg.load_sources()
     return cfg

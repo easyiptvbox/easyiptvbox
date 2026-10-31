@@ -13,3 +13,4 @@ app/config.yaml.bak
 app/config.yaml.2*.bak
 app/config.yaml.wiped-*
 backup-relocation/
+app/profiles/

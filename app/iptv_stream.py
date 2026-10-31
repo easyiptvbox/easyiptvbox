@@ -71,26 +71,35 @@ def _item(kind, name, url):
             "url": url, "ext": _ext(url)}
 
 
-_reg = {"key": None, "items": {}, "catalog": None, "posters": {}}
+_regs = {}                 # profile id -> {"key","items","catalog","posters"}
 _reg_lock = threading.Lock()
 _extra = {}                 # episodes registered when listed
 
 
-def _registry():
+def _registry(pid=None):
     """Everything that may be streamed: the categories/movies/series added
-    under Settings. Rebuilt when the config or provider cache changes."""
+    under Settings (of this profile). Rebuilt when the config or provider
+    cache changes."""
+    import iptv_profiles
+    pid = pid or iptv_profiles.current()
     def mt(p):
         try:
             return os.path.getmtime(p)
         except OSError:
             return 0
-    key = (mt(CONFIG_PATH),
+    key = (mt(iptv_profiles.config_path(pid)), mt(CONFIG_PATH),
            mt(os.path.join(CACHE_DIR, "provider_channels.json")))
     with _reg_lock:
-        if _reg["key"] == key and _reg["catalog"] is not None:
-            return _reg["items"], _reg["catalog"]
+        reg = _regs.get(pid)
+        if reg and reg["key"] == key and reg["catalog"] is not None:
+            return reg["items"], reg["catalog"]
         from iptv_config import load_config
-        cfg = load_config()
+        _prev = getattr(iptv_profiles._local, "pid", None)
+        iptv_profiles.set_request(pid)
+        try:
+            cfg = load_config()
+        finally:
+            iptv_profiles.set_request(_prev)
         items, live, movies, series = {}, [], [], []
         posters = {}
 
@@ -131,7 +140,7 @@ def _registry():
                              "channels": chans})
         cat = {"live": live, "movies": movies, "series": series,
                "palette": _lp.PALETTE}
-        _reg.update(key=key, items=items, catalog=cat, posters=posters)
+        _regs[pid] = dict(key=key, items=items, catalog=cat, posters=posters)
         return items, cat
 
 
@@ -147,8 +156,13 @@ def live_category_urls(key):
 
 def poster_url(pid):
     """Provider poster URL for a catalog poster id (only known ids)."""
+    import iptv_profiles
     _registry()
-    return _reg["posters"].get(pid)
+    for p in [iptv_profiles.current()] + iptv_profiles.ids():
+        url = (_regs.get(p) or {}).get("posters", {}).get(pid)
+        if url:
+            return url
+    return None
 
 
 def catalog():
@@ -175,10 +189,20 @@ def series_episodes(sid):
 
 def resolve(item_id, kind=None):
     """The streamable item with this id, or None."""
-    it = _registry()[0].get(item_id) or _extra.get(item_id)
+    import iptv_profiles
+    cur = iptv_profiles.current()
+    pids = [cur] + [p for p in iptv_profiles.ids() if p != cur]
+    it = None
+    for p in pids:          # links (VLC, downloads) carry no profile: any works
+        it = _registry(p)[0].get(item_id)
+        if it:
+            break
+    it = it or _extra.get(item_id)
     if it is None and kind in (None, "episode"):
         # after a restart: look in the cached episode lists of added series
-        sids = {s["sid"] for s in catalog()["series"]}
+        sids = set()
+        for p in pids:
+            sids |= {x["sid"] for x in _registry(p)[1]["series"]}
         for sid in sids:
             safe = "".join(ch for ch in sid if ch.isalnum())
             try:

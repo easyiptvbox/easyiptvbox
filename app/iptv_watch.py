@@ -9,10 +9,14 @@ import json
 import os
 import time
 
+import iptv_profiles
 from iptv_config import (CACHE_DIR, CONFIG_PATH, cached_provider_movies,
                          cached_provider_series)
 
-SEARCHES_PATH = os.path.join(CACHE_DIR, "saved_searches.json")
+
+
+def _searches_path():
+    return os.path.join(iptv_profiles.state_dir(), "saved_searches.json")
 
 
 def _key(kind, item):
@@ -32,18 +36,18 @@ def matches(kind, query):
 
 def load():
     try:
-        with open(SEARCHES_PATH, "r", encoding="utf-8") as f:
+        with open(_searches_path(), "r", encoding="utf-8") as f:
             return [s for s in json.load(f) if isinstance(s, dict)]
     except Exception:
         return []
 
 
 def _save(searches):
-    os.makedirs(os.path.dirname(SEARCHES_PATH), exist_ok=True)
-    tmp = SEARCHES_PATH + ".tmp"
+    os.makedirs(os.path.dirname(_searches_path()), exist_ok=True)
+    tmp = _searches_path() + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(searches, f, indent=1)
-    os.replace(tmp, SEARCHES_PATH)
+    os.replace(tmp, _searches_path())
 
 
 def add(kind, query):
@@ -86,8 +90,7 @@ def check():
         return 0
     import yaml
     try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+        data = iptv_profiles.read_config_data()
     except Exception:
         return 0
     playlists = data.setdefault("playlists", [])
@@ -136,10 +139,7 @@ def check():
     if added:
         from iptv_web import build_config_yaml
         text = build_config_yaml(data)
-        tmp = CONFIG_PATH + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            f.write(text)
-        os.replace(tmp, CONFIG_PATH)
+        iptv_profiles.write_config_text(text)
     if len(remaining) != len(searches):
         _save(remaining)
     return added

@@ -157,6 +157,20 @@ def list_profiles():
             for p in _all()]
 
 
+def stamp():
+    """Changes when profiles or their pictures change (TV redraw)."""
+    try:
+        t = [os.path.getmtime(INDEX)]
+    except OSError:
+        t = [0]
+    for pid in ids():
+        try:
+            t.append(os.path.getmtime(avatar_path(pid)))
+        except OSError:
+            t.append(0)
+    return tuple(t)
+
+
 def extra_count():
     return len(_all()) - 1
 

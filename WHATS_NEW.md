@@ -5,6 +5,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 26 October 2026
 
 **New**
+- **Profiles**: several people can have their own Movies, Live and Series categories, theme, text size, watch history and live pictures. Settings > Profile switches the profile in the web app (the Default profile is always shown and the TV starts on it), and Settings > Manage profiles adds, renames, protects with an optional 4-6 digit PIN, gives a picture to, or deletes profiles; a new profile can start empty or as a copy. On the TV the profiles are listed above the QR code. Provider login, TV guide, audio sync, remotes and Wi-Fi stay shared.
 - Settings in the web app now **save by themselves**: the Save & Apply and Cancel buttons are gone. A small "Saved" note appears when a change is stored. If you change a setting while watching TV, the picture is not interrupted; the TV applies the change when you leave the stream.
 - **Play on TV** button in the web app's Play tab (above "Open in VLC"): starts the chosen channel, movie or episode on the TV. Movies and episodes continue from where you stopped.
 - The Play tab now shows channel pictures for live categories. Opening a category there also starts the picture scan on the box, as long as nothing is playing on the TV; pictures appear as they are made.

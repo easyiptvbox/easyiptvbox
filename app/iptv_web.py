@@ -15,6 +15,7 @@ import http.server
 import socketserver
 
 import iptv_input as ir
+import iptv_profiles
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 UPDATE_STATUS = "/var/lib/iptv-update/status"
@@ -138,6 +139,75 @@ class ControlServer:
                 self.wfile.write(body)
 
             # ---- GET ----
+            def _handle_profiles_post(self, path, raw):
+                P = iptv_profiles
+                import iptv_remote
+                try:
+                    if iptv_remote.from_vpn(self.client_address[0]):
+                        self._send(403, {"error": "Change profiles from home"})
+                        return
+                except Exception:
+                    pass
+                action = path.split("/")[3] if path.count("/") >= 3 else ""
+                tok_hdr = self.headers.get("X-Profile-Token", "")
+                try:
+                    if action == "avatar":      # POST /api/profiles/avatar/<id>
+                        pid = path.rsplit("/", 1)[-1]
+                        if not P.exists(pid) or not P.token_ok(pid, tok_hdr):
+                            self._send(403, {"error": "pin", "profile": pid})
+                            return
+                        P.save_avatar(pid, raw)
+                        self._send(200, {"ok": True})
+                        return
+                    try:
+                        d = json.loads(raw or b"{}")
+                    except Exception:
+                        d = {}
+                    pid = str(d.get("id", ""))
+                    tok = str(d.get("token", ""))
+                    if action == "unlock":
+                        if not P.exists(pid):
+                            self._send(404, {"error": "No such profile"})
+                            return
+                        t = P.unlock(pid, str(d.get("pin", "")))
+                        if t is None:
+                            self._send(403, {"error": "Wrong PIN"})
+                        else:
+                            self._send(200, {"ok": True, "token": t})
+                        return
+                    if action == "create":
+                        src = d.get("copy") or None
+                        if src and (not P.exists(src) or
+                                    not P.token_ok(src, str(d.get("copy_token", "")))):
+                            self._send(403, {"error": "Open the profile you "
+                                             "want to copy first (PIN)"})
+                            return
+                        new = P.create(d.get("name", ""), d.get("pin", ""), src)
+                        self._send(200, {"ok": True, "id": new})
+                        return
+                    if action in ("rename", "pin", "delete", "avatar-delete"):
+                        if not P.exists(pid):
+                            self._send(404, {"error": "No such profile"})
+                            return
+                        if not P.token_ok(pid, tok):
+                            self._send(403, {"error": "pin", "profile": pid})
+                            return
+                        if action == "rename":
+                            P.rename(pid, d.get("name", ""))
+                        elif action == "pin":
+                            P.set_pin(pid, d.get("pin", ""))
+                        elif action == "delete":
+                            P.delete(pid)
+                        else:
+                            P.delete_avatar(pid)
+                        self._send(200, {"ok": True})
+                        return
+                    self._send(404, {"error": "not found"})
+                except PermissionError as e:
+                    self._send(429, {"error": str(e)})
+                except ValueError as e:
+                    self._send(400, {"error": str(e)})
+
             def _handle_livepic_post(self, path, raw):
                 import iptv_livepics, iptv_remote
                 try:
@@ -223,7 +293,46 @@ class ControlServer:
                 self.send_response(404)
                 self.end_headers()
 
+            PROTECTED = ("/api/config", "/api/play/", "/api/provider/",
+                         "/api/saved-searches", "/api/livepic/")
+
+            def _enter(self, method):
+                """Pick this request's profile and enforce its PIN."""
+                import urllib.parse as up
+                path, _, qs = self.path.partition("?")
+                q = up.parse_qs(qs)
+                pid = (self.headers.get("X-Profile") or
+                       (q.get("p") or [""])[0] or iptv_profiles.DEFAULT)
+                if not iptv_profiles.exists(pid):
+                    pid = iptv_profiles.DEFAULT
+                iptv_profiles.set_request(pid)
+                img = (method == "GET" and (
+                    path.startswith("/api/poster/") or
+                    path.startswith("/api/thumb/") or
+                    (path.startswith("/api/livepic/") and
+                     path != "/api/livepic/list")))
+                if (not img and path.startswith(self.PROTECTED) and
+                        not iptv_profiles.token_ok(
+                            pid, self.headers.get("X-Profile-Token", ""))):
+                    self._send(403, {"error": "pin", "profile": pid})
+                    return False
+                return True
+
             def do_GET(self):
+                try:
+                    if self._enter("GET"):
+                        self._do_GET()
+                finally:
+                    iptv_profiles.clear_request()
+
+            def do_POST(self):
+                try:
+                    if self._enter("POST"):
+                        self._do_POST()
+                finally:
+                    iptv_profiles.clear_request()
+
+            def _do_GET(self):
                 path = self.path.split("?")[0]
                 if path == "/help":
                     import iptv_help
@@ -262,6 +371,27 @@ class ControlServer:
                         iptv_stream.hls_serve(self, parts[2], parts[3])
                     else:
                         self._send(404, {"error": "not found"})
+                    return
+                if path == "/api/profiles":
+                    self._send(200, {"profiles": iptv_profiles.list_profiles(),
+                                     "active": iptv_profiles.ACTIVE})
+                    return
+                if path.startswith("/api/profiles/avatar/"):
+                    pid = path.rsplit("/", 1)[-1].split(".")[0]
+                    fp = (iptv_profiles.avatar_path(pid)
+                          if iptv_profiles.exists(pid) and
+                          iptv_profiles.has_avatar(pid) else None)
+                    if not fp:
+                        self._send(404, {"error": "no picture"})
+                        return
+                    with open(fp, "rb") as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(data)
                     return
                 if path == "/api/livepic/list":
                     import iptv_livepics
@@ -376,10 +506,7 @@ class ControlServer:
                         self._send(500, {"error": str(e)})
                 elif path == "/api/config-data":
                     try:
-                        import yaml
-                        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                            data = yaml.safe_load(f) or {}
-                        self._send(200, data)
+                        self._send(200, iptv_profiles.read_config_data())
                     except Exception as e:
                         self._send(500, {"error": str(e)})
                 elif path == "/api/provider/search":
@@ -404,7 +531,7 @@ class ControlServer:
                     self._send(404, {"error": "not found"})
 
             # ---- POST ----
-            def do_POST(self):
+            def _do_POST(self):
                 path = self.path.split("?")[0]
                 length = int(self.headers.get("Content-Length", 0) or 0)
                 if length > 8 * 1024 * 1024:
@@ -412,6 +539,9 @@ class ControlServer:
                     self._send(413, {"error": "File too large"})
                     return
                 raw = self.rfile.read(length) if length else b""
+                if path.startswith("/api/profiles/"):
+                    self._handle_profiles_post(path, raw)
+                    return
                 if path.startswith("/api/livepic/"):
                     self._handle_livepic_post(path, raw)
                     return
@@ -453,7 +583,8 @@ class ControlServer:
                         return
                     outer.pending_tv = {"kind": kind, "url": it["url"],
                                         "name": it["name"],
-                                        "sid": str(d.get("sid", ""))}
+                                        "sid": str(d.get("sid", "")),
+                                        "profile": iptv_profiles.current()}
                     outer.q.put("__play_tv__")
                     self._send(200, {"ok": True})
                     return
@@ -780,25 +911,25 @@ class ControlServer:
                 self._send(200, {"ok": True})
 
             def _write_config(self, text):
-                """Backup + write config.yaml. Sends error + returns False on fail."""
+                """Backup + write the active request profile's config. Sends
+                an error + returns False on failure."""
+                path = iptv_profiles.config_path()
                 try:
-                    if os.path.exists(CONFIG_PATH):
-                        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    if os.path.exists(path):
+                        with open(path, "r", encoding="utf-8") as f:
                             old = f.read()
-                        with open(CONFIG_PATH + ".bak", "w", encoding="utf-8") as f:
+                        with open(path + ".bak", "w", encoding="utf-8") as f:
                             f.write(old)
                         # dated history: keep the last 10 versions
                         import time as _t, glob as _g
                         if old.strip():
-                            hist = CONFIG_PATH + ".%s.bak" % _t.strftime(
+                            hist = path + ".%s.bak" % _t.strftime(
                                 "%Y%m%d-%H%M%S")
                             with open(hist, "w", encoding="utf-8") as f:
                                 f.write(old)
-                            for oldf in sorted(_g.glob(CONFIG_PATH +
-                                               ".2*.bak"))[:-10]:
+                            for oldf in sorted(_g.glob(path + ".2*.bak"))[:-10]:
                                 os.remove(oldf)
-                    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                        f.write(text)
+                    iptv_profiles.write_config_text(text)
                     return True
                 except Exception as e:
                     self._send(500, {"error": "save failed: %s" % e})
@@ -826,7 +957,8 @@ class ControlServer:
                 # safety: never wipe all categories by accident
                 try:
                     import yaml as _y
-                    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    with open(iptv_profiles.config_path(), "r",
+                              encoding="utf-8") as f:
                         cur = _y.safe_load(f) or {}
                     if (cur.get("playlists") and
                             not (_y.safe_load(text) or {}).get("playlists")):
@@ -837,7 +969,9 @@ class ControlServer:
                     pass
                 if not self._write_config(text):
                     return
-                outer.q.put("__reload_config__")
+                if iptv_profiles.current() in (iptv_profiles.ACTIVE,
+                                               iptv_profiles.DEFAULT):
+                    outer.q.put("__reload_config__")
                 self._send(200, {"ok": True})
 
         return Handler
@@ -1128,7 +1262,7 @@ PAGE = r"""<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>TV Remote</h1>
+  <h1>TV Remote <span id="profBadge" style="display:none;font-size:.7rem;font-weight:600;padding:.1rem .5rem;border-radius:10px;background:var(--accent);color:#fff;vertical-align:middle"></span></h1>
   <button class="tab active" data-tab="remote">Remote</button>
   <button class="tab" data-tab="play">Play</button>
   <button class="tab" data-tab="config">Settings</button>
@@ -1195,6 +1329,17 @@ PAGE = r"""<!DOCTYPE html>
     <p style="margin:0 0 .6rem;color:var(--dim);font-size:.85rem">Tap a section title for help, or
       <a href="/help" target="_blank" rel="noopener" style="color:var(--accent)">read all instructions</a>.</p>
     <div class="msg" id="msg"></div>
+
+    <div class="card" id="profCard">
+      <h2>Profile</h2>
+      <label>Profile used in this browser</label>
+      <select id="profSel"></select>
+      <div id="profPinRow" style="display:none;margin-top:.5rem" class="minirow">
+        <input type="password" id="profPin" inputmode="numeric" maxlength="6" placeholder="PIN" autocomplete="off">
+        <button class="ghost" id="profUnlock" style="flex:0 0 auto">Unlock</button>
+      </div>
+      <div id="profNote" class="pnote"></div>
+    </div>
 
     <div class="card" id="movieCard">
       <h2><a class="hl" href="/help#movies" target="_blank" rel="noopener">Movies <span class="hi">?</span></a></h2>
@@ -1333,6 +1478,19 @@ PAGE = r"""<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="card" id="profMgr">
+      <h2>Manage profiles</h2>
+      <div class="pnote">Each profile has its own Movies, Live and Series categories, theme, text size and
+        watch history. The Default profile always exists and the TV starts on it.</div>
+      <div id="profList"></div>
+      <label style="margin-top:.8rem">Add a profile</label>
+      <input type="text" id="profNewName" placeholder="Name" maxlength="24" autocomplete="off">
+      <input type="password" id="profNewPin" inputmode="numeric" maxlength="6" placeholder="PIN (optional, 4-6 digits)" autocomplete="off" style="margin-top:.4rem">
+      <select id="profNewCopy" style="margin-top:.4rem"></select>
+      <button class="ghost" id="profCreate" style="width:100%;margin-top:.5rem">Create profile</button>
+      <div id="profMsg" class="pnote" style="min-height:1.2em"></div>
+    </div>
+
     <div class="card" id="updCard">
       <h2>Software updates</h2>
       <div id="updStatus" class="pnote"></div>
@@ -1423,6 +1581,23 @@ PAGE = r"""<!DOCTYPE html>
 </main>
 
 <script>
+// ---- profiles: every API call carries this browser's profile (and its PIN token) ----
+const PROF={id:'default',tok:{}};
+try{ const s=JSON.parse(sessionStorage.getItem('prof')||'{}'); if(s.id) PROF.id=s.id; PROF.tok=s.tok||{}; }catch(e){}
+function profSave(){ try{ sessionStorage.setItem('prof',JSON.stringify({id:PROF.id,tok:PROF.tok})); }catch(e){} }
+function pq(u){ return u+(u.indexOf('?')>=0?'&':'?')+'p='+PROF.id; }
+const _fetch=window.fetch.bind(window);
+window.fetch=async(u,o)=>{
+  if(typeof u==='string' && u.indexOf('/api/')===0){
+    o=Object.assign({},o||{});
+    o.headers=Object.assign({'X-Profile':PROF.id,'X-Profile-Token':PROF.tok[PROF.id]||''},o.headers||{});
+  }
+  const r=await _fetch(u,o);
+  if(r.status===403 && PROF.id!=='default' && typeof u==='string' && u.indexOf('/api/profiles')!==0){
+    r.clone().json().then(j=>{ if(j&&j.error==='pin'){ PROF.id='default'; profSave(); location.reload(); } }).catch(()=>{});
+  }
+  return r;
+};
 function press(b){
   fetch('/api/press',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({button:b})}).catch(()=>{});
@@ -1437,7 +1612,7 @@ document.querySelectorAll('.tab[data-tab]').forEach(t=>{
     t.classList.add('active');
     document.querySelectorAll('section').forEach(s=>s.classList.remove('active'));
     document.getElementById(t.dataset.tab).classList.add('active');
-    if(t.dataset.tab==='config'){ loadForm(); loadRemote(); loadUpdate(); loadLivePics(); }
+    if(t.dataset.tab==='config'){ loadProfiles().then(loadForm); loadRemote(); loadUpdate(); loadLivePics(); }
     if(t.dataset.tab==='play') loadPlay();
     else stopPlayer();
   });
@@ -1570,6 +1745,7 @@ async function loadForm(){
   $('epgRefresh').value=epg.refresh_hours||96;
   $('textSize').value=st.text_size||'large';
   $('themeSel').value=st.theme||'dark';
+  document.documentElement.dataset.theme=st.theme||'dark';
   $('audioDelay').value=(st.audio_delay_ms!==undefined&&st.audio_delay_ms!==null)?st.audio_delay_ms:0;
   PL=JSON.parse(JSON.stringify(d.playlists||[]));
   PL.forEach(p=>{p.channels=p.channels||[];});
@@ -1817,6 +1993,102 @@ loadRemotes();
 // ---- Theme (shared with the TV; saved with the other settings) ----
 $('themeSel').addEventListener('change',()=>{ document.documentElement.dataset.theme=$('themeSel').value; });
 
+// ---- Profiles ----
+let PROFS=[], PROF_PENDING=null;
+const SHARED_IDS=['provEnabled','provUrl','provUser','provPass','epgSources','epgRefresh','audioDelay'];
+function profMsg(ok,t){ const m=$('profMsg'); m.textContent=t; m.style.color=ok?'var(--oktx)':'var(--errtx)'; }
+function profAvatar(p,px){
+  const d=document.createElement('div');
+  d.style.cssText='width:'+px+'px;height:'+px+'px;border-radius:50%;overflow:hidden;flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;background:#'+((p.id==='default')?'5a6a8a':(parseInt(p.id.slice(0,6),16)%0xffffff).toString(16).padStart(6,'0'));
+  if(p.has_pic){ const i=document.createElement('img'); i.src='/api/profiles/avatar/'+p.id+'.jpg?t='+Date.now(); i.style.cssText='width:100%;height:100%;object-fit:cover';
+    d.appendChild(i); }
+  else d.textContent=p.name.slice(0,1).toUpperCase();
+  return d;
+}
+function applySharedLock(){
+  const lock=(PROF.id!=='default');
+  SHARED_IDS.forEach(id=>{ const e=$(id); if(e) e.disabled=lock; });
+  const cur=PROFS.find(p=>p.id===PROF.id);
+  $('profNote').textContent=lock
+    ? 'Editing the profile "'+(cur?cur.name:'')+'": categories, theme and text size. Provider, TV guide and audio sync are shared by the whole box and can only be changed in the Default profile.'
+    : 'Editing the Default profile. Provider, TV guide and audio sync are shared by all profiles.';
+  const b=$('profBadge');
+  if(lock&&cur){ b.textContent=cur.name; b.style.display=''; } else b.style.display='none';
+}
+async function loadProfiles(){
+  let d; try{ d=await (await fetch('/api/profiles')).json(); }catch(e){ return; }
+  PROFS=d.profiles||[];
+  if(!PROFS.find(p=>p.id===PROF.id)){ PROF.id='default'; profSave(); }
+  const sel=$('profSel'); sel.innerHTML='';
+  PROFS.forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent=p.name+(p.has_pin?'  \uD83D\uDD12':''); sel.appendChild(o); });
+  sel.value=PROF.id;
+  const cp=$('profNewCopy'); cp.innerHTML='';
+  const o0=document.createElement('option'); o0.value=''; o0.textContent='Start empty'; cp.appendChild(o0);
+  PROFS.forEach(p=>{ const o=document.createElement('option'); o.value=p.id; o.textContent='Copy of '+p.name; cp.appendChild(o); });
+  const list=$('profList'); list.innerHTML='';
+  PROFS.forEach(p=>{
+    const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:.6rem;margin:.5rem 0;flex-wrap:wrap';
+    row.appendChild(profAvatar(p,44));
+    const nm=document.createElement('div'); nm.style.cssText='flex:1;min-width:6rem'; nm.textContent=p.name+(p.has_pin?'  \uD83D\uDD12':'')+(p.default?'  (always shown)':''); row.appendChild(nm);
+    const mk=(t,fn)=>{ const b=document.createElement('button'); b.className='ghost'; b.type='button'; b.textContent=t; b.style.cssText='flex:0 0 auto;padding:.35rem .6rem;font-size:.8rem'; b.onclick=fn; row.appendChild(b); };
+    mk('Picture',()=>profPicture(p));
+    if(p.has_pic) mk('Remove picture',()=>profCall('avatar-delete',{id:p.id}));
+    if(!p.default){ mk('Rename',()=>{ const n=prompt('New name',p.name); if(n) profCall('rename',{id:p.id,name:n}); });
+      mk(p.has_pin?'Change PIN':'Set PIN',()=>{ const n=prompt('PIN, 4 to 6 digits'+(p.has_pin?' (leave empty to remove the PIN)':'')); if(n!==null) profCall('pin',{id:p.id,pin:n}); });
+      mk('Delete',()=>{ if(confirm('Delete the profile "'+p.name+'" with its categories and watch history?')) profCall('delete',{id:p.id}); }); }
+    list.appendChild(row);
+  });
+  applySharedLock();
+}
+async function profCall(action,body){
+  body=Object.assign({token:PROF.tok[body.id]||''},body);
+  const r=await fetch('/api/profiles/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok){ profMsg(true,'Done.'); if(action==='delete'&&PROF.id===body.id){ PROF.id='default'; profSave(); await afterProfileChange(); } else await loadProfiles(); return j; }
+  profMsg(false, j.error==='pin' ? 'Select that profile at the top of Settings and enter its PIN first.' : (j.error||'Failed.'));
+}
+function profPicture(p){
+  const f=document.createElement('input'); f.type='file'; f.accept='image/*';
+  f.onchange=async()=>{
+    const file=f.files[0]; if(!file) return;
+    if(file.size>6*1024*1024){ profMsg(false,'The picture must be smaller than 6 MB.'); return; }
+    const r=await fetch('/api/profiles/avatar/'+p.id,{method:'POST',headers:{'Content-Type':'application/octet-stream','X-Profile-Token':PROF.tok[p.id]||''},body:file});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){ profMsg(true,'Picture saved.'); await loadProfiles(); }
+    else profMsg(false, j.error==='pin' ? 'Select that profile at the top of Settings and enter its PIN first.' : (j.error||'Upload failed.'));
+  };
+  f.click();
+}
+async function afterProfileChange(){
+  await loadProfiles();
+  await loadForm();
+  loadLivePics(); loadPlay();
+}
+async function profSelect(id){
+  const p=PROFS.find(x=>x.id===id); if(!p) return;
+  if(typeof autoSave==='function'){ await autoSave(); while(AS_BUSY) await new Promise(r=>setTimeout(r,50)); }
+  if(p.has_pin && !PROF.tok[id]){ PROF_PENDING=id; $('profPinRow').style.display=''; $('profPin').value=''; $('profPin').focus(); return; }
+  $('profPinRow').style.display='none'; PROF_PENDING=null;
+  PROF.id=id; profSave(); await afterProfileChange();
+}
+$('profSel').onchange=()=>profSelect($('profSel').value);
+$('profUnlock').onclick=async()=>{
+  const id=PROF_PENDING; if(!id) return;
+  const r=await fetch('/api/profiles/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id,pin:$('profPin').value})});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok){ PROF.tok[id]=j.token; $('profPinRow').style.display='none'; PROF_PENDING=null; PROF.id=id; profSave(); await afterProfileChange(); }
+  else{ $('profNote').textContent=j.error||'Wrong PIN'; $('profNote').style.color='var(--errtx)'; setTimeout(()=>{ $('profNote').style.color=''; applySharedLock(); },3000); $('profPin').value=''; if(r.status===429||true) $('profSel').value=PROF.id; }
+};
+$('profPin').addEventListener('keydown',e=>{ if(e.key==='Enter') $('profUnlock').click(); });
+$('profCreate').onclick=async()=>{
+  const src=$('profNewCopy').value;
+  const r=await fetch('/api/profiles/create',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:$('profNewName').value,pin:$('profNewPin').value,copy:src,copy_token:PROF.tok[src]||''})});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok){ $('profNewName').value=''; $('profNewPin').value=''; profMsg(true,'Profile created.'); await loadProfiles(); }
+  else profMsg(false, j.error||'Could not create the profile.');
+};
+
 // ---- Live thumbnails ----
 let LP={live:[],have:new Set()};
 function lpKey(){
@@ -1829,7 +2101,7 @@ function lpPreview(){
   const k=lpKey(), box=$('lpPrev'); box.textContent='no picture';
   $('lpDel').disabled=!LP.have.has(k);
   if(k && LP.have.has(k)){ const i=document.createElement('img'); i.style.cssText='width:100%;height:100%;object-fit:cover';
-    i.src='/api/livepic/'+k+'.jpg?t='+Date.now(); box.textContent=''; box.appendChild(i); }
+    i.src=pq('/api/livepic/'+k+'.jpg?t='+Date.now()); box.textContent=''; box.appendChild(i); }
 }
 async function loadLivePics(){
   let d; try{ d=await (await fetch('/api/play/catalog')).json(); }catch(e){ return; }
@@ -2032,7 +2304,7 @@ async function loadPlay(){
     live.innerHTML='';
     if(!(d.live||[]).length){ live.textContent='No live categories added under Settings.'; return; }
     live.appendChild(posterGrid((d.live||[]).map(c=>({key:c.key,name:c.name,color:col(c.ci),
-      src:have.has(c.key)?'/api/livepic/'+c.key+'.jpg':'',c:c})),it=>showChans(it.c),true));
+      src:have.has(c.key)?pq('/api/livepic/'+c.key+'.jpg'):'',c:c})),it=>showChans(it.c),true));
   };
   const showChans=cat=>{
     live.innerHTML='';
@@ -2040,7 +2312,7 @@ async function loadPlay(){
     b.textContent='\u2190 '+cat.name+' ('+cat.channels.length+')'; b.style.cssText='width:100%;margin-bottom:.3rem';
     b.onclick=showCats; live.appendChild(b);
     const g=posterGrid(cat.channels.map(c=>({key:c.id,name:c.name,color:col(c.ci),retry:true,
-      src:have.has('c'+c.id)?'/api/livepic/c'+c.id+'.jpg':'/api/thumb/'+c.id+'.jpg',c:c})),
+      src:have.has('c'+c.id)?pq('/api/livepic/c'+c.id+'.jpg'):pq('/api/thumb/'+c.id+'.jpg'),c:c})),
       it=>playItem('live',it.c.id,it.c.name,'ts'),true);
     live.appendChild(g);
     // ask the box to make pictures for this category (only while the TV is idle)
@@ -2051,12 +2323,12 @@ async function loadPlay(){
   showCats();
   const mv=$('pmovies'); mv.innerHTML='';
   if((d.movies||[]).length)
-    mv.appendChild(posterGrid(d.movies.map(m=>({key:m.id,name:m.name,src:m.poster?'/api/poster/'+m.poster+'.jpg':'',m:m})),
+    mv.appendChild(posterGrid(d.movies.map(m=>({key:m.id,name:m.name,src:m.poster?pq('/api/poster/'+m.poster+'.jpg'):'',m:m})),
       it=>playItem('movie',it.m.id,it.m.name,it.m.ext)));
   else mv.textContent='No movies added under Settings.';
   const se=$('pseries'); se.innerHTML=''; $('peps').innerHTML='';
   if((d.series||[]).length){
-    se.appendChild(posterGrid(d.series.map(s=>({key:s.sid,name:s.name,src:s.poster?'/api/poster/'+s.poster+'.jpg':'',s:s})),
+    se.appendChild(posterGrid(d.series.map(s=>({key:s.sid,name:s.name,src:s.poster?pq('/api/poster/'+s.poster+'.jpg'):'',s:s})),
       it=>{ CURSID=it.s.sid; loadEpisodes(it.s.sid); }));
   } else se.textContent='No series added under Settings.';
 }
@@ -2235,6 +2507,10 @@ $('wifiRetestBtn').onclick=async()=>{
   setTimeout(loadWifi,2000);
 };
 loadWifi();
+if(PROF.id!=='default'){      // restored profile of this browser session
+  loadProfiles();
+  fetch('/api/config-data').then(r=>r.ok?r.json():null).then(d=>{ if(d) document.documentElement.dataset.theme=(d.settings||{}).theme||'dark'; }).catch(()=>{});
+}
 
 </script>
 </body>

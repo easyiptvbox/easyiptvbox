@@ -39,6 +39,7 @@ HELP_PAGE = r"""<!DOCTYPE html>
  <a href="#series">TV series</a>
  <a href="#live">Live categories</a>
  <a href="#epg">TV guide</a>
+ <a href="#profiles">Profiles</a>
  <a href="#appearance">Appearance</a>
  <a href="#playback">Playback</a>
  <a href="#remotes">Remotes</a>
@@ -137,6 +138,23 @@ pick a series, a season and an episode. &ldquo;Add future results automatically&
 channels automatically and refreshed every 24 hours.</p>
 <p><b>Provider lists refresh every (hours)</b> controls how often the channel, movie and
 series lists are downloaded again (only while nothing is playing). Saved searches are checked then.</p>
+</section>
+
+<section id="profiles"><h2>Profiles</h2>
+<p>Profiles let several people have their own Movies, Live and Series categories, theme, text size and
+watch history. Provider login, TV guide, audio sync, remotes, Wi-Fi and updates are shared by the whole box.</p>
+<ul>
+ <li>The <b>Default</b> profile always exists. It can't be renamed, deleted or protected, and the TV always starts in it.</li>
+ <li><b>Settings &gt; Profile</b> (top of the page) chooses which profile this browser shows and edits.
+  A profile with a PIN (lock icon) asks for it first. A new browser session starts on Default again.</li>
+ <li><b>Settings &gt; Manage profiles</b>: add a profile (name, optional PIN of 4 to 6 digits, and start empty or copy another
+  profile: categories, theme and live pictures are copied, watch history is not), rename, change the PIN, add a picture, delete.</li>
+ <li>On the TV, once you have created a profile, the left menu lists the profiles above the QR code. Select one and press OK;
+  a protected profile asks for its PIN with the arrows and OK.</li>
+ <li><b>Play on TV</b> from the web app switches the TV to the profile you are using in the web app.</li>
+</ul>
+<p class="tip">A PIN is a soft lock: it keeps others out of a profile but is not real security, because anyone on your
+network can open the web app.</p>
 </section>
 
 <section id="appearance"><h2>Appearance</h2>

@@ -3283,7 +3283,7 @@ class App:
                        self.show_thumbs, iptv_posters.version,
                        self.section, self.menu_focus, self.live_sel,
                        self.menu_prof, iptv_profiles.ACTIVE,
-                       iptv_profiles.extra_count(), self._pin_idx,
+                       iptv_profiles.extra_count(), iptv_profiles.stamp(), self._pin_idx,
                        len(self._pin_buf), self._pin_msg,
                        iptv_livepics.dir_stamp(),
                        getattr(self, "_grid_index", 0),

@@ -957,7 +957,7 @@ PAGE = r"""<!DOCTYPE html>
          display:flex; align-items:center; justify-content:center; transition:.05s;
          box-shadow:0 2px 0 #0006; }
   .btn:active { transform:translateY(2px); box-shadow:none; background:var(--accent); }
-  .dpad .ok { background:var(--accent); border-radius:50%; font-size:1.2rem; }
+  .dpad .ok { background:var(--accent); border-radius:50%; font-size:1.2rem; color:#fff; }
   .row { display:flex; gap:.6rem; justify-content:center; width:100%; }
   .row .btn { flex:1; height:64px; max-width:150px; }
   .vol { display:flex; gap:.6rem; align-items:center; }

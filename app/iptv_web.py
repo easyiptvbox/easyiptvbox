@@ -445,9 +445,11 @@ class ControlServer:
                     if not it:
                         self._send(404, {"error": "Not found"})
                         return
-                    if iptv_stream.busy():
-                        self._send(409, {"error": "Another device is streaming "
-                                         "from the box. Stop it first."})
+                    # the page's own preview must not block it
+                    if not iptv_stream.release_for_tv():
+                        self._send(409, {"error": "Another device is still "
+                                         "streaming from the box. Stop it "
+                                         "first."})
                         return
                     outer.pending_tv = {"kind": kind, "url": it["url"],
                                         "name": it["name"],

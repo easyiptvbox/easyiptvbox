@@ -413,7 +413,16 @@ class App:
         def loop():
             from iptv_config import (fetch_provider_channels,
                                      fetch_provider_movies,
-                                     fetch_provider_series)
+                                     fetch_provider_series,
+                                     fetch_provider_limits)
+            # connection limit: check at startup (if the saved value is old
+            # or missing) and on every refresh below; the picture scan uses it
+            try:
+                fetch_provider_limits(
+                    prov, max_age_hours=max(1.0, float(getattr(
+                        self.cfg, "refresh_hours", 96))))
+            except Exception as e:
+                print("Provider limits check failed: %s" % e, flush=True)
             while True:
                 hours = max(1.0, float(getattr(self.cfg, "refresh_hours", 96)))
                 time.sleep(hours * 3600)
@@ -424,7 +433,8 @@ class App:
                 if not prov_now.get("enabled"):
                     continue
                 # Force-refresh each cache. Failures are non-fatal (kept cache).
-                for label, fn in (("channels", fetch_provider_channels),
+                for label, fn in (("limits", fetch_provider_limits),
+                                   ("channels", fetch_provider_channels),
                                    ("movies", fetch_provider_movies),
                                    ("series", fetch_provider_series)):
                     try:
@@ -1625,10 +1635,15 @@ class App:
                                  SCREEN_REMOTE, SCREEN_HELP):
             self.notify("Finish the setup on the TV first", 4)
             return
-        if self._stream_busy():
-            return
         if self.screen_state == SCREEN_PLAYING and self.is_movie_playing():
             self._save_movie_position()
+        self._force_play = True
+        try:
+            self._play_on_tv_inner(req)
+        finally:
+            self._force_play = False
+
+    def _play_on_tv_inner(self, req):
         url, kind = req["url"], req["kind"]
         pls = self.cfg.playlists
         self.menu_focus = False
@@ -1703,6 +1718,8 @@ class App:
 
     def _stream_busy(self):
         """True (and tells the user) if a phone/computer is streaming."""
+        if getattr(self, "_force_play", False):
+            return False        # "Play on TV": the web app already took over
         if iptv_stream.busy():
             self.notify("Busy - playing on another device", 4)
             return True

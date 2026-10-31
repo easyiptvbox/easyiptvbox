@@ -585,6 +585,38 @@ def fetch_series_episodes(prov, series_id, force=False, max_age_hours=24):
 # --------------------------------------------------------------------------
 #  EPG (XMLTV) support
 # --------------------------------------------------------------------------
+def fetch_provider_limits(prov, force=False, max_age_hours=96):
+    """How many simultaneous connections the provider allows (account info
+    `max_connections`). Cached; refreshed with the other provider data."""
+    cache = _cache_path("provider_limits.json")
+    if (not force and os.path.exists(cache) and
+            (time.time() - os.path.getmtime(cache)) < max_age_hours * 3600):
+        return provider_max_connections()
+    base, username, password = _parse_provider(prov)
+    if not base or not username or not password:
+        raise ValueError("provider needs a URL + username + password")
+    api = "%s/player_api.php?username=%s&password=%s" % (
+        base, urllib.parse.quote(username), urllib.parse.quote(password))
+    info = (_http_json(api, timeout=30) or {}).get("user_info") or {}
+    try:
+        n = max(1, int(str(info.get("max_connections", "1")).strip() or 1))
+    except ValueError:
+        n = 1
+    with open(cache, "w", encoding="utf-8") as f:
+        json.dump({"max_connections": n, "time": time.time()}, f)
+    return n
+
+
+def provider_max_connections(default=1):
+    """Cached connection limit (1 if unknown - the safe assumption)."""
+    try:
+        with open(os.path.join(CACHE_DIR, "provider_limits.json"), "r",
+                  encoding="utf-8") as f:
+            return max(1, int(json.load(f).get("max_connections", default)))
+    except Exception:
+        return default
+
+
 def _cache_path(name):
     os.makedirs(CACHE_DIR, exist_ok=True)
     return os.path.join(CACHE_DIR, name)

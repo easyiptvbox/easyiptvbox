@@ -16,6 +16,7 @@ THUMB_DIR = os.path.join(CACHE_DIR, "thumbs")
 
 THUMB_WIDTH = 320
 GRAB_TIMEOUT = 4           # seconds max per channel (skip slow/dead ones fast)
+MAX_WORKERS = 4         # upper bound for parallel grabs
 MAX_AGE = 3600             # re-grab thumbnails older than one hour
 BLACK_YAVG = 20            # frames darker than this average luma are "black"
 import re
@@ -210,6 +211,7 @@ class ThumbScanner:
         self.done = 0
         self.active = False
         self.current = None     # url being grabbed right now
+        self.workers = 1
 
     def is_scanning(self):
         return self.active
@@ -230,10 +232,26 @@ class ThumbScanner:
         self._gen += 1
         gen = self._gen
 
+        # Use the provider's connection allowance: keep one connection free
+        # for watching, never more than MAX_WORKERS. 1 connection -> serial.
+        try:
+            from iptv_config import provider_max_connections
+            n = max(1, min(MAX_WORKERS, provider_max_connections() - 1))
+        except Exception:
+            n = 1
+        n = min(n, len(todo))
+        self.workers = n
+        lock = threading.Lock()
+        state = {"i": 0, "running": n}
+
         def worker():
-            for u in todo:
-                if self._stop.is_set() or gen != self._gen:
-                    break
+            while True:
+                with lock:
+                    if (self._stop.is_set() or gen != self._gen
+                            or state["i"] >= len(todo)):
+                        break
+                    u = todo[state["i"]]
+                    state["i"] += 1
                 self.current = u
                 _grab_one(u)
                 # re-check after the (slow) grab: a stop()/new scan may have
@@ -241,16 +259,23 @@ class ThumbScanner:
                 if gen != self._gen or self._stop.is_set():
                     break           # interrupted: not a real attempt
                 record_attempt(u)
-                self.done += 1
-                if self.done % 10 == 0:
-                    save_attempts()
-            save_attempts()
-            # only clear active if we're still the current generation
-            if gen == self._gen:
-                self.active = False
+                with lock:
+                    self.done += 1
+                    if self.done % 10 == 0:
+                        save_attempts()
+            with lock:
+                state["running"] -= 1
+                last = state["running"] == 0
+            if last:
+                save_attempts()
+                # only clear active if we're still the current generation
+                if gen == self._gen:
+                    self.active = False
 
-        self._thread = threading.Thread(target=worker, daemon=True)
-        self._thread.start()
+        self._threads = [threading.Thread(target=worker, daemon=True)
+                         for _ in range(n)]
+        for th in self._threads:
+            th.start()
 
     def stop(self):
         # Signal the running worker to quit and bump the generation so any

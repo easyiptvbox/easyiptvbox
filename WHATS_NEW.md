@@ -22,6 +22,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - Movies can be streamed to your phone/computer (Safari player, VLC, download).
 
 **Changed**
+- The box now checks how many simultaneous connections your provider allows (at start and with every provider refresh) and uses it for the picture scan: with 1 connection it scans one channel at a time, with more it scans several in parallel (always leaving one connection free for watching).
 - The picture scan starts each grab a little faster (smaller stream probe).
 - In the dark theme the TV's QR code is now dark too (light squares on a dark background).
 - The picture-scan text now shows which page is being scanned ("Scanning pictures on page 2/21") instead of a channel count.
@@ -35,6 +36,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - README points to the QR code on the TV start page for opening the web app.
 
 **Fixed**
+- "Play on TV" no longer says "Another device is streaming" because of the web page's own preview: it now stops the preview first and takes over.
 - The picture scan no longer retries channels that gave no picture within the last hour, and an interrupted scan continues where it stopped.
 - A live stream that fails to start or stops (black screen) is now retried automatically up to three times, then the box returns to the channel list with a message.
 - After watching a live channel, going back to the picture grid continues the picture scan where it stopped.

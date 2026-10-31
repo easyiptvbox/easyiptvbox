@@ -524,6 +524,19 @@ def hls_stop():
             pass
 
 
+def release_for_tv(wait=6.0):
+    """"Play on TV": end this web app's own preview (live HLS session / movie
+    relay) so it does not hold the provider's connection, and wait briefly for
+    the browser to close its relay. Returns True when nothing else streams."""
+    global _last_activity
+    hls_stop()
+    _last_activity = 0.0
+    end = time.time() + wait
+    while _active > 0 and time.time() < end:
+        time.sleep(0.2)
+    return not busy(grace=0)
+
+
 def hls_state():
     return {"id": _hls["id"], "alive": _hls["alive"], "state": _hls["state"]}
 

@@ -369,13 +369,30 @@ class App:
         self.message_until = time.time() + seconds
 
     def _live_channels_for_epg(self):
-        """(tvg_id, name) for every channel in the live categories."""
-        out = []
-        for pl in self.cfg.playlists:
-            if pl.is_movies or getattr(pl, "is_series", False):
-                continue
-            for c in pl.channels:
-                out.append((c.tvg_id, c.name))
+        """(tvg_id, name) for the live channels of ALL profiles: the TV guide
+        is shared by every profile."""
+        out, seen = [], set()
+        prev = getattr(iptv_profiles._local, "pid", None)
+        try:
+            for pid in iptv_profiles.ids():
+                try:
+                    if pid == iptv_profiles.ACTIVE and prev is None:
+                        cfg = self.cfg
+                    else:
+                        iptv_profiles.set_request(pid)
+                        cfg = load_config()
+                except Exception:
+                    continue
+                for pl in cfg.playlists:
+                    if pl.is_movies or getattr(pl, "is_series", False):
+                        continue
+                    for c in pl.channels:
+                        k = (c.tvg_id, c.name)
+                        if k not in seen:
+                            seen.add(k)
+                            out.append(k)
+        finally:
+            iptv_profiles.set_request(prev)
         return out
 
     def start_epg_thread(self):
@@ -699,6 +716,18 @@ class App:
         self.section = self._load_ui_state()
         self._enter_section()
         self._last_sig = None
+
+        def rebuild_epg():          # guide covers every profile's channels
+            try:
+                import iptv_epg
+                live = self._live_channels_for_epg()
+                if live:
+                    iptv_epg.build_auto_epg(live)
+                self.epg.refresh()
+            except Exception as e:
+                print("EPG rebuild after profile switch failed: %s" % e,
+                      flush=True)
+        threading.Thread(target=rebuild_epg, daemon=True).start()
 
     PIN_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "<", "0", "OK"]
 

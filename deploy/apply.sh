@@ -14,7 +14,7 @@ rm -f "$FLAG"
 # --- app code (keep user data) ---
 install -d -o "$APP_USER" -g "$APP_USER" "$APP_DST"
 changes="$(rsync -rlpt --checksum --itemize-changes --chown="$APP_USER:$APP_USER" \
-    --exclude=config.yaml --exclude=config.yaml.bak --exclude=remotes.json \
+    --exclude=config.yaml --exclude=config.yaml.bak --exclude="config.yaml.*"  --exclude=remotes.json \
     --exclude=cache/ --exclude=__pycache__/ --exclude='*.tmp' \
     "$REPO/app/" "$APP_DST/")"
 [ -n "$changes" ] && touch "$FLAG"

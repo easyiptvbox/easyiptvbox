@@ -787,6 +787,16 @@ class ControlServer:
                             old = f.read()
                         with open(CONFIG_PATH + ".bak", "w", encoding="utf-8") as f:
                             f.write(old)
+                        # dated history: keep the last 10 versions
+                        import time as _t, glob as _g
+                        if old.strip():
+                            hist = CONFIG_PATH + ".%s.bak" % _t.strftime(
+                                "%Y%m%d-%H%M%S")
+                            with open(hist, "w", encoding="utf-8") as f:
+                                f.write(old)
+                            for oldf in sorted(_g.glob(CONFIG_PATH +
+                                               ".2*.bak"))[:-10]:
+                                os.remove(oldf)
                     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                         f.write(text)
                     return True
@@ -813,6 +823,18 @@ class ControlServer:
                 except Exception as e:
                     self._send(400, {"error": "YAML error: %s" % e})
                     return
+                # safety: never wipe all categories by accident
+                try:
+                    import yaml as _y
+                    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                        cur = _y.safe_load(f) or {}
+                    if (cur.get("playlists") and
+                            not (_y.safe_load(text) or {}).get("playlists")):
+                        self._send(409, {"error": "Refused: this would remove "
+                                         "all categories. Reload the page."})
+                        return
+                except Exception:
+                    pass
                 if not self._write_config(text):
                     return
                 outer.q.put("__reload_config__")
@@ -1538,7 +1560,8 @@ function refreshSearchButtons(){
 
 async function loadForm(){
   $('msg').className='msg';
-  const r=await fetch('/api/config-data'); const d=await r.json();
+  FORM_LOADED=false;
+  const r=await fetch('/api/config-data'); if(!r.ok) return; const d=await r.json();
   const prov=d.provider||{}, epg=d.epg||{}, st=d.settings||{};
   $('provEnabled').value = prov.enabled? '1':'';
   $('provUrl').value=prov.url||''; $('provUser').value=prov.username||'';
@@ -1553,7 +1576,7 @@ async function loadForm(){
   // ensure Movies & Series always exist
   moviesPl(); seriesPl();
   renderAdded();
-  SAVED_SNAP=snapNow(); AS_LAST=SAVED_SNAP;
+  SAVED_SNAP=snapNow(); AS_LAST=SAVED_SNAP; FORM_LOADED=true;
 }
 
 function collectForm(){
@@ -1704,7 +1727,7 @@ $('catBtn').onclick=searchCategories;
 $('catSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();searchCategories();}});
 
 // ---- Autosave: every change in Settings is saved and applied by itself ----
-let SAVED_SNAP=null, AS_STABLE=0, AS_LAST='', AS_BUSY=false;
+let FORM_LOADED=false, SAVED_SNAP=null, AS_STABLE=0, AS_LAST='', AS_BUSY=false;
 function toast(ok,text){
   const t=$('toast'); t.textContent=text; t.style.display='block';
   t.style.background=ok?'var(--okbg)':'var(--errbg)'; t.style.color=ok?'var(--oktx)':'var(--errtx)';
@@ -1712,7 +1735,7 @@ function toast(ok,text){
 }
 function snapNow(){ try{ return JSON.stringify(collectForm()); }catch(e){ return null; } }
 async function autoSave(){
-  if(AS_BUSY) return;
+  if(AS_BUSY||!FORM_LOADED) return;
   const snap=snapNow(); if(snap===null||snap===SAVED_SNAP) return;
   AS_BUSY=true;
   try{
@@ -1725,7 +1748,7 @@ async function autoSave(){
   AS_BUSY=false;
 }
 setInterval(()=>{
-  if(SAVED_SNAP===null) return;
+  if(!FORM_LOADED||SAVED_SNAP===null) return;
   if($('config').offsetParent===null) return;             // Settings tab not shown
   const a=document.activeElement;
   if(a && (a.tagName==='TEXTAREA' || (a.tagName==='INPUT' && !['checkbox','file','button'].includes(a.type)))) {
@@ -1736,7 +1759,7 @@ setInterval(()=>{
   if(snap!==AS_LAST){ AS_LAST=snap; AS_STABLE=0; return; }
   if(snap!==SAVED_SNAP && ++AS_STABLE>=1) autoSave();
 },1000);
-document.addEventListener('visibilitychange',()=>{ if(document.hidden) autoSave(); });
+document.addEventListener('visibilitychange',()=>{ if(document.hidden && FORM_LOADED) autoSave(); });
 
 // ---- remotes management ----
 async function loadRemotes(){

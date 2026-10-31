@@ -10,4 +10,6 @@ app/cache/
 app/remotes.json
 app/*.tmp
 app/config.yaml.bak
+app/config.yaml.2*.bak
+app/config.yaml.wiped-*
 backup-relocation/

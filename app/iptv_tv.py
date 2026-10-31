@@ -2294,8 +2294,11 @@ class App:
         """Return a cached pygame surface with a QR code for the web app URL."""
         url = web_app_url()
         cache = getattr(self, "_qr_cache", None)
-        if cache and cache[0] == url and abs(cache[1] - target_px) < 4:
+        dark = (self.cfg.theme == "dark")
+        if (cache and cache[0] == url and abs(cache[1] - target_px) < 4
+                and cache[3] == dark):
             return cache[2]
+        bg, fg = (MENU_BG, TEXT) if dark else ((255, 255, 255), (0, 0, 0))
         try:
             import qrcode
             q = qrcode.QRCode(border=2, box_size=1,
@@ -2309,13 +2312,13 @@ class App:
         scale = max(1, target_px // n)
         size = n * scale
         surf = pygame.Surface((size, size))
-        surf.fill((255, 255, 255))
+        surf.fill(bg)
         for r, rowvals in enumerate(matrix):
             for c, val in enumerate(rowvals):
                 if val:
-                    pygame.draw.rect(surf, (0, 0, 0),
+                    pygame.draw.rect(surf, fg,
                                      (c * scale, r * scale, scale, scale))
-        self._qr_cache = (url, target_px, surf)
+        self._qr_cache = (url, target_px, surf, dark)
         return surf
 
     def _menu_w(self):
@@ -2362,7 +2365,7 @@ class App:
         surf = self._qr_surface(qr_px)
         if surf is not None:
             qx = (mw - qr_px) // 2
-            pygame.draw.rect(self.surface, (255, 255, 255),
+            pygame.draw.rect(self.surface, (MENU_BG if self.cfg.theme == "dark" else (255, 255, 255)),
                              (qx - 6, qy - 6, qr_px + 12, qr_px + 12),
                              border_radius=8)
             self.surface.blit(pygame.transform.scale(surf, (qr_px, qr_px)),

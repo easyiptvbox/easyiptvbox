@@ -122,7 +122,10 @@ def _registry():
                         it = _item("live", c.name, c.url)
                         items[it["id"]] = it
                         chans.append({"id": it["id"], "name": it["name"]})
-                live.append({"name": p.display_name, "channels": chans})
+                live.append({"name": p.display_name,
+                             "key": "k" + hashlib.sha1(p.display_name.strip()
+                                      .encode("utf-8")).hexdigest()[:12],
+                             "channels": chans})
         cat = {"live": live, "movies": movies, "series": series}
         _reg.update(key=key, items=items, catalog=cat, posters=posters)
         return items, cat

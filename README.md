@@ -70,19 +70,25 @@ the changes per week (also linked from Settings).
 | Arrows ↑ ↓ ← →| Move the selection                            |
 | OK            | Open a list / start a channel                 |
 | Back          | Go back one screen                            |
-| Home          | Return to the first screen (the list of lists)|
+| Home          | Return to the start page (left menu)          |
 | Up / Down (while watching) | Switch to previous / next channel|
 | Menu / Back (while watching) | Show the channel list again    |
 | Volume + / −  | Change the volume                             |
 
 ## Screens
 
-1. **Choose a list** — big buttons (News, Sports, Test Channels, …)
-2. **Choose a channel** — the channels inside that list (shows "Now"
-   from the TV guide if EPG is configured)
-   Movies and Series are shown as a **poster grid** (pictures supplied by
-   your provider, cached in `app/cache/posters`; items without a picture
-   show their title).
+1. **Start page** — a thin menu on the left is always shown: **Live**,
+   **Movies**, **Series** and the QR code (bottom). Up/Down in the menu
+   switches the page, OK/Right enters it, Left/Back returns to the menu.
+   The last used section is remembered across restarts (first run: Live).
+   - **Live**: your categories as picture tiles. Open one to get its
+     channels as a picture grid. Tiles show a picture you uploaded in
+     *Settings > Live thumbnails*, else the grabbed frame (Menu key to
+     refresh), else a colored square.
+   - **Movies / Series**: a **poster grid** (pictures supplied by your
+     provider, cached in `app/cache/posters`; items without a picture
+     show their title).
+2. **Choose an episode** — for series: seasons and episodes as lists
 3. **Watching** — full-screen video
 
 ## Changing channels / provider — edit ONE file

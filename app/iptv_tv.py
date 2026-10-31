@@ -30,8 +30,16 @@ from iptv_web import ControlServer
 from iptv_movies import MovieState
 import iptv_thumbs
 import iptv_posters
+import iptv_livepics
 import iptv_net
 import iptv_stream
+
+MENU_SCREENS = ("playlists", "channels", "series")   # screens with the left menu
+SECTIONS = ("live", "movies", "series")
+SECTION_LABELS = {"live": "Live", "movies": "Movies", "series": "Series"}
+UI_STATE_PATH = os.path.join(
+    os.environ.get("IPTV_CACHE", os.path.join(os.path.dirname(
+        os.path.abspath(__file__)), "cache")), "ui_state.json")
 
 WEB_PORT = int(os.environ.get("IPTV_WEB_PORT", "8080"))
 
@@ -107,6 +115,10 @@ class App:
 
         self.screen_state = SCREEN_PLAYLISTS
         self.pl_index = 0          # selected playlist
+        self._ox = 0               # left offset of the content (menu width)
+        self.menu_focus = False    # keyboard focus is in the left menu
+        self.live_sel = 0          # selected live category tile
+        self.section = self._load_ui_state()
         self.ch_index = 0          # selected channel
         self.current_playlist = None
         self.current_channel = None
@@ -464,10 +476,11 @@ class App:
             self.screen_state = SCREEN_POWER   # any key: back to the menu
             self._last_sig = None
             return
-        if self.screen_state == SCREEN_PLAYLISTS and a in (ir.MENU, ir.BACK,
-                                                          ir.HOME):
-            self.open_power_menu()
-            return
+        if self.screen_state in MENU_SCREENS:
+            self._normalize_home()
+            if self.menu_focus:
+                self._act_menu(a)
+                return
         if a == ir.HOME:
             if self.screen_state == SCREEN_PLAYING and self.is_movie_playing():
                 self._save_movie_position()
@@ -497,38 +510,110 @@ class App:
         except Exception:
             pass
 
+    # -- left menu / sections ---------------------------------------------
+    def _load_ui_state(self):
+        try:
+            import json
+            with open(UI_STATE_PATH, "r", encoding="utf-8") as f:
+                sec = json.load(f).get("section")
+            if sec in SECTIONS:
+                return sec
+        except Exception:
+            pass
+        return "live"       # first run: Live is the only section with content
+
+    def _save_ui_state(self):
+        try:
+            import json
+            os.makedirs(os.path.dirname(UI_STATE_PATH), exist_ok=True)
+            tmp = UI_STATE_PATH + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"section": self.section}, f)
+            os.replace(tmp, UI_STATE_PATH)
+        except Exception:
+            pass
+
+    def _live_cats(self):
+        return [i for i, p in enumerate(self.cfg.playlists)
+                if not getattr(p, "is_movies", False)
+                and not getattr(p, "is_series", False)]
+
+    def _section_playlist(self, sec):
+        for i, p in enumerate(self.cfg.playlists):
+            if sec == "movies" and getattr(p, "is_movies", False):
+                return i
+            if sec == "series" and getattr(p, "is_series", False):
+                return i
+        return None
+
+    def _enter_section(self):
+        """Show the page of the selected menu section."""
+        self.thumbs.stop()
+        self.scan_menu = False
+        if self.section == "live":
+            cats = self._live_cats()
+            self.live_sel = max(0, min(self.live_sel, len(cats) - 1))
+            if cats:
+                self.pl_index = cats[self.live_sel]
+            self.screen_state = SCREEN_PLAYLISTS
+        else:
+            idx = self._section_playlist(self.section)
+            if idx is None:
+                self.section = "live"
+                self.screen_state = SCREEN_PLAYLISTS
+            else:
+                self.pl_index = idx
+                self.open_playlist(idx)
+        self._last_sig = None
+
+    def _normalize_home(self):
+        """The start screen is the page of the selected section."""
+        if self.screen_state == SCREEN_PLAYLISTS and self.section != "live":
+            self._enter_section()
+
+    def _act_menu(self, a):
+        k = SECTIONS.index(self.section)
+        if a in (ir.UP, ir.DOWN):
+            k = (k + (1 if a == ir.DOWN else -1)) % len(SECTIONS)
+            self.section = SECTIONS[k]
+            self._save_ui_state()
+            self._enter_section()
+        elif a in (ir.OK, ir.RIGHT):
+            self.menu_focus = False
+        elif a in (ir.BACK, ir.MENU, ir.HOME):
+            self.open_power_menu()
+
     def _act_playlists(self, a):
-        if not self.cfg.playlists:
+        """Live section: grid of category tiles."""
+        cats = self._live_cats()
+        if not cats:
+            if a in (ir.BACK, ir.LEFT):
+                self.menu_focus = True
             return
-        row, col, rows = self._start_pos()
-        if a == ir.UP:
-            if row > 0:
-                new = rows[row - 1]
-                self.pl_index = new[min(col, len(new) - 1)]
-        elif a == ir.DOWN:
-            if row < len(rows) - 1:
-                new = rows[row + 1]
-                self.pl_index = new[min(col, len(new) - 1)]
-        elif a == ir.LEFT:
-            if col > 0:
-                self.pl_index = rows[row][col - 1]
-        elif a == ir.RIGHT:
-            if col < len(rows[row]) - 1:
-                self.pl_index = rows[row][col + 1]
-        elif a in (ir.OK,):
+        r = self._poster_nav(a, self.live_sel, len(cats), cols=self.LIVE_COLS)
+        if r is None:
+            self.menu_focus = True
+        elif r == "ok":
+            self.pl_index = cats[self.live_sel]
             self.open_playlist(self.pl_index)
+        else:
+            self.live_sel = r
+            self.pl_index = cats[r]
 
     def _act_channels(self, a):
         chans = self.current_playlist.channels
         n = len(chans)
         if n == 0:
             if a in (ir.BACK, ir.LEFT):
-                self.screen_state = SCREEN_PLAYLISTS
+                if self.current_playlist.is_movies:
+                    self.menu_focus = True
+                else:
+                    self.screen_state = SCREEN_PLAYLISTS
             return
         if self.current_playlist.is_movies:
             r = self._poster_nav(a, self.ch_index, n)
             if r is None:
-                self.screen_state = SCREEN_PLAYLISTS
+                self.menu_focus = True
             elif r == "ok":
                 self._grid_play = None
                 self.play_channel(self.ch_index)
@@ -545,37 +630,19 @@ class App:
             self.sm_index = 0
             return
         if self.show_thumbs:
-            grid = self._grid_channels()
-            gn = len(grid)
+            # picture grid: every channel is shown (uploaded picture, grabbed
+            # frame or colored square); the selection is ch_index.
             cols = self._thumb_cols()
-            if gn == 0:
-                # nothing to show yet (still scanning or all empty)
-                if a in (ir.BACK, ir.LEFT):
-                    self.show_thumbs = False
-                return
-            gi = min(getattr(self, "_grid_index", 0), gn - 1)
-            if a == ir.UP:
-                gi = max(0, gi - cols)
-            elif a == ir.DOWN:
-                gi = min(gn - 1, gi + cols)
-            elif a == ir.LEFT:
-                if gi % cols == 0:
-                    self.show_thumbs = False   # leave pictures -> plain list
-                    return
-                gi -= 1
-            elif a == ir.RIGHT:
-                gi = min(gn - 1, gi + 1)
-            elif a == ir.OK:
-                self._grid_index = gi
-                # remember the picture list so Up/Down while watching stays
-                # within channels that have a thumbnail
-                self._grid_play = [idx for idx, _c in grid]
-                self.play_channel(grid[gi][0])   # map to real channel index
-                return
-            elif a == ir.BACK:
-                self.show_thumbs = False       # back to the plain list
-                return
-            self._grid_index = gi
+            gi = self.ch_index = max(0, min(self.ch_index, n - 1))
+            r = self._poster_nav(a, gi, n, cols=cols)
+            if r is None:                  # Back / Left on first column
+                self.thumbs.stop()
+                self.screen_state = SCREEN_PLAYLISTS   # category tiles
+            elif r == "ok":
+                self._grid_play = None
+                self.play_channel(gi)
+            else:
+                self.ch_index = r
             return
         # plain list view
         if a == ir.UP:
@@ -603,7 +670,6 @@ class App:
             force = (self.sm_index == 0)   # "Rescan all" = force
             self.scan_menu = False
             self.show_thumbs = True
-            self._grid_index = 0
             self._start_thumb_scan(force=force)
 
     def _start_thumb_scan(self, force=False):
@@ -624,20 +690,10 @@ class App:
         else:
             self.notify("Thumbnails ready", 2)
 
+    LIVE_COLS = 5
+
     def _thumb_cols(self):
-        return 4
-
-    def _grid_channels(self):
-        """Channels that currently have a valid (non-black) thumbnail.
-
-        Returns a list of (original_index, channel). Empty/black channels are
-        hidden from the grid but are still scanned each time.
-        """
-        out = []
-        for i, c in enumerate(self.current_playlist.channels):
-            if iptv_thumbs.has_thumb(c.url):
-                out.append((i, c))
-        return out
+        return self.LIVE_COLS
 
     # -- series navigation (series -> seasons -> episodes) --------------
     def _act_series(self, a):
@@ -645,11 +701,11 @@ class App:
         n = len(series)
         if n == 0:
             if a in (ir.BACK, ir.LEFT):
-                self.screen_state = SCREEN_PLAYLISTS
+                self.menu_focus = True
             return
         r = self._poster_nav(a, self.series_index, n)
         if r is None:
-            self.screen_state = SCREEN_PLAYLISTS
+            self.menu_focus = True
         elif r == "ok":
             self.open_series(self.series_index)
         else:
@@ -657,10 +713,10 @@ class App:
 
     POSTER_COLS = 6
 
-    def _poster_nav(self, a, i, n):
+    def _poster_nav(self, a, i, n, cols=None):
         """Move in the poster grid. Returns the new index, "ok", None (leave
         the grid: Back, or Left on the first column) or i (unchanged)."""
-        cols = self.POSTER_COLS
+        cols = cols or self.POSTER_COLS
         if a == ir.UP:
             return i - cols if i - cols >= 0 else i
         if a == ir.DOWN:
@@ -1038,6 +1094,7 @@ class App:
         self.player.stop()
         self._acquire_display()
         self.screen_state = SCREEN_PLAYLISTS
+        self.menu_focus = True
 
     # -- power menu / standby -------------------------------------------
     def open_power_menu(self):
@@ -1047,7 +1104,8 @@ class App:
         self.power_index = 0  # 0=Standby, 1=Shut down, 2=Cancel
         self._return_screen = (self.screen_state
                                if self.screen_state in (SCREEN_PLAYLISTS,
-                                                        SCREEN_CHANNELS)
+                                                        SCREEN_CHANNELS,
+                                                        SCREEN_SERIES)
                                else SCREEN_PLAYLISTS)
         self.screen_state = SCREEN_POWER
 
@@ -1471,6 +1529,9 @@ class App:
         self.current_playlist = None
         self.current_channel = None
         self.screen_state = SCREEN_PLAYLISTS
+        self.menu_focus = False
+        self.live_sel = 0
+        self._enter_section()
         self.notify("Settings updated", 3)
         # rebuild the automatic EPG mapping for the (possibly changed) channel
         # set, then reload the guide - all in the background.
@@ -1495,15 +1556,13 @@ class App:
         self.current_playlist = self.cfg.playlists[idx]
         self._grid_play = None
         self.ch_index = 0
-        self.show_thumbs = False
+        self.show_thumbs = self._is_live_category()   # live: picture grid
         self.scan_menu = False
         self._thumb_surfaces = {}
         if getattr(self.current_playlist, "is_series", False):
             self.series_index = 0
             self.screen_state = SCREEN_SERIES
         else:
-            # Always start with the plain channel list. The picture grid only
-            # appears when the user presses Menu.
             self.screen_state = SCREEN_CHANNELS
 
     def _is_live_category(self):
@@ -1620,6 +1679,10 @@ class App:
                                      int(self.H * 0.9)))
             return
         self.surface.fill(BG)
+        self._ox = 0
+        if self.screen_state in MENU_SCREENS:
+            self._normalize_home()
+            self._draw_menu()
         if self.screen_state == SCREEN_PLAYLISTS:
             self._draw_playlists()
         elif self.screen_state == SCREEN_CHANNELS:
@@ -1629,12 +1692,12 @@ class App:
         elif self.screen_state == SCREEN_RESUME:
             self._draw_resume()
         elif self.screen_state == SCREEN_SERIES:
+            ser = self.current_playlist.series
             self._draw_poster_grid(
-                self.current_playlist.name,
-                [(x["name"], x.get("logo", ""), False)
-                 for x in self.current_playlist.series],
-                self.series_index, "OK to open  -  Back to categories",
-                empty="No series added yet.")
+                self.current_playlist.name, len(ser),
+                lambda k: (ser[k]["name"], ser[k].get("logo", ""), False),
+                self.series_index, "OK to open  -  Left for menu",
+                empty="No series added yet.", focused=not self.menu_focus)
         elif self.screen_state == SCREEN_SEASONS:
             self._draw_list(self.current_series["name"],
                             [s["name"] for s in self.current_seasons],
@@ -1709,101 +1772,137 @@ class App:
                                   y + (row_h - 12) // 2 - t.get_height() // 2))
         self._draw_hint(hint)
 
-    def _poster_surface(self, url, w, h):
-        """Scaled poster for the grid, or None while not downloaded."""
-        if not url or not iptv_posters.has_poster(url):
+    def _poster_surface(self, src, w, h, cover=False):
+        """Scaled picture for a tile, or None. `src` is a provider poster URL
+        (cached on disk by iptv_posters) or a local file path."""
+        if not src:
             return None
-        key = (url, w, h)
-        surf = self._poster_surfaces.get(key)
-        if surf is None:
-            try:
-                img = pygame.image.load(iptv_posters.poster_path(url)).convert()
-                iw, ih = img.get_size()
+        if src.startswith("/"):
+            path = src
+        elif iptv_posters.has_poster(src):
+            path = iptv_posters.poster_path(src)
+        else:
+            return None
+        try:
+            mt = os.path.getmtime(path)
+        except OSError:
+            return None
+        key = (path, w, h, cover)
+        hit = self._poster_surfaces.get(key)
+        if hit and hit[0] == mt:
+            return hit[1]
+        try:
+            img = pygame.image.load(path).convert()
+            iw, ih = img.get_size()
+            if cover:
+                k = max(w / iw, h / ih)
+                sc = pygame.transform.smoothscale(
+                    img, (max(w, int(iw * k)), max(h, int(ih * k))))
+                surf = pygame.Surface((w, h))
+                surf.blit(sc, ((w - sc.get_width()) // 2,
+                               (h - sc.get_height()) // 2))
+            else:
                 k = min(w / iw, h / ih)
                 surf = pygame.transform.smoothscale(
                     img, (max(1, int(iw * k)), max(1, int(ih * k))))
-            except Exception:
-                return None
-            if len(self._poster_surfaces) > 150:
-                self._poster_surfaces.clear()
-            self._poster_surfaces[key] = surf
+        except Exception:
+            return None
+        if len(self._poster_surfaces) > 200:
+            self._poster_surfaces.clear()
+        self._poster_surfaces[key] = (mt, surf)
         return surf
 
-    def _draw_poster_grid(self, title, entries, sel, hint, empty="Nothing here."):
-        """Grid of posters. entries: [(name, poster_url, watched)]."""
-        self._draw_header(title)
-        n = len(entries)
+    def _text_tile(self, rect, name, bg, fg):
+        """A tile without a picture: filled box with the wrapped title."""
+        pygame.draw.rect(self.surface, bg, rect, border_radius=8)
+        x, y, w, h = rect
+        lines, cur = [], ""
+        for wd in name.split():
+            t = (cur + " " + wd).strip()
+            if self.f_grid_label.size(t)[0] <= w - 16 or not cur:
+                cur = t
+            else:
+                lines.append(cur)
+                cur = wd
+        if cur:
+            lines.append(cur)
+        lh = self.f_grid_label.get_height()
+        shown = max(1, min(len(lines), 6, (h - 8) // lh))
+        yy = y + max(4, (h - lh * shown) // 2)
+        for ln in lines[:shown]:
+            t = self._fit(self.f_grid_label, ln, fg, w - 12)
+            self.surface.blit(t, (x + (w - t.get_width()) // 2, yy))
+            yy += lh
+
+    def _draw_poster_grid(self, title, n, get, sel, hint, empty="Nothing here.",
+                          cols=6, rows=2, aspect=2 / 3, colored=False,
+                          cover=False, focused=True, subtitle=""):
+        """Grid of tiles. get(i) -> (name, picture, watched); picture is a
+        provider URL, a local file path or ''. Colored/dark text tile when
+        there is no picture."""
+        self._draw_header(title + (("   " + subtitle) if subtitle else ""),
+                          font=self.f_grid_header)
+        left0 = self._ox
+        avail_w = self.W - left0
         if n == 0:
             msg = self.f_item.render(empty, True, DIM)
-            self.surface.blit(msg, (int(self.W * 0.06), int(self.H * 0.4)))
+            self.surface.blit(msg, (left0 + int(self.W * 0.03),
+                                    int(self.H * 0.4)))
             self._draw_hint(hint)
             return
-        cols, rows = self.POSTER_COLS, 2
-        left = int(self.W * 0.05)
         top = int(self.H * 0.16)
         gap = int(self.W * 0.014)
         vgap = int(self.H * 0.025)
-        area_w = int(self.W * 0.90)
+        area_w = int(avail_w * 0.94)
         area_h = int(self.H * 0.80) - top
         label_h = int(self.H * 0.045)
         cell_h = (area_h - vgap * (rows - 1)) // rows
         img_h = cell_h - label_h
-        img_w = int(img_h * 2 / 3)
+        img_w = int(img_h * aspect)
         if img_w * cols + gap * (cols - 1) > area_w:
             img_w = (area_w - gap * (cols - 1)) // cols
-            img_h = int(img_w * 3 / 2)
+            img_h = int(img_w / aspect)
         total_w = img_w * cols + gap * (cols - 1)
-        left = (self.W - total_w) // 2
+        left = left0 + (avail_w - total_w) // 2
         per_page = cols * rows
         sel = max(0, min(sel, n - 1))
         start = (sel // per_page) * per_page
-        # fetch this page and the next one in the background
-        iptv_posters.request([entries[k][1] for k in
-                              range(start, min(n, start + per_page * 2))])
-        for pos in range(start, min(start + per_page, n)):
-            name, logo, watched = entries[pos]
-            rel = pos - start
+        page = [get(k) for k in range(start, min(n, start + per_page))]
+        # download this page and the next one in the background
+        iptv_posters.request([get(k)[1] for k in
+                              range(start, min(n, start + per_page * 2))
+                              if get(k)[1].startswith("http")])
+        for rel, (name, logo, watched) in enumerate(page):
+            pos = start + rel
             x = left + (rel % cols) * (img_w + gap)
             y = top + (rel // cols) * (cell_h + vgap)
-            is_sel = (pos == sel)
+            is_sel = focused and (pos == sel)
             pygame.draw.rect(self.surface, SELECT if is_sel else PANEL,
                              (x - 4, y - 4, img_w + 8, img_h + label_h + 8),
                              border_radius=10)
             tile = pygame.Rect(x, y, img_w, img_h)
-            surf = self._poster_surface(logo, img_w, img_h)
+            surf = self._poster_surface(logo, img_w, img_h, cover)
             if surf is not None:
                 self.surface.blit(surf, (x + (img_w - surf.get_width()) // 2,
                                          y + (img_h - surf.get_height()) // 2))
+            elif colored:
+                self._text_tile(tile, name, iptv_livepics.color_for(name),
+                                SELECT_TEXT)
             else:
-                pygame.draw.rect(self.surface, (10, 12, 18), tile, border_radius=8)
-                # text tile: title inside the box while there is no picture
-                words, lines, cur = name.split(), [], ""
-                for wd in words:
-                    t = (cur + " " + wd).strip()
-                    if self.f_grid_label.size(t)[0] <= img_w - 16 or not cur:
-                        cur = t
-                    else:
-                        lines.append(cur)
-                        cur = wd
-                if cur:
-                    lines.append(cur)
-                lh = self.f_grid_label.get_height()
-                yy = y + max(6, (img_h - lh * min(len(lines), 6)) // 2)
-                for ln in lines[:6]:
-                    t = self._fit(self.f_grid_label, ln, DIM, img_w - 12)
-                    self.surface.blit(t, (x + (img_w - t.get_width()) // 2, yy))
-                    yy += lh
+                self._text_tile(tile, name, (10, 12, 18), DIM)
             if watched:
                 pygame.draw.rect(self.surface, ACCENT, tile, width=4,
                                  border_radius=8)
             col = SELECT_TEXT if is_sel else (ACCENT if watched else TEXT)
             t = self._fit(self.f_grid_label, name, col, img_w - 4)
             self.surface.blit(t, (x + 2, y + img_h + 4))
-        full = self._fit(self.f_item, entries[sel][0], TEXT, self.W * 0.88)
-        self.surface.blit(full, ((self.W - full.get_width()) // 2,
-                                 int(self.H * 0.83)))
+        if focused:
+            full = self._fit(self.f_item, get(sel)[0], TEXT, avail_w * 0.9)
+            self.surface.blit(full, (left0 + (avail_w - full.get_width()) // 2,
+                                     int(self.H * 0.83)))
         pages = (n + per_page - 1) // per_page
-        self._draw_hint("%s   (page %d/%d)" % (hint, start // per_page + 1, pages))
+        self._draw_hint("%s   (page %d/%d)" % (hint, start // per_page + 1,
+                                               pages))
 
     def _draw_resume(self):
         self._draw_header(self.current_channel.name)
@@ -1970,8 +2069,11 @@ class App:
         self._draw_hint("Press any button to go back")
 
     def _draw_header(self, title, font=None):
-        t = self._fit(font or self.f_title, title, TEXT, self.W * 0.78)
-        self.surface.blit(t, (int(self.W * 0.06), int(self.H * 0.05)))
+        t = self._fit(font or self.f_title, title, TEXT,
+                      (self.W - self._ox) * 0.78)
+        self.surface.blit(t, (self._ox + int(self.W * 0.03 if self._ox
+                                             else self.W * 0.06),
+                              int(self.H * 0.05)))
 
     def _draw_clock(self):
         if not self.cfg.show_clock:
@@ -1982,8 +2084,10 @@ class App:
                               int(self.H * 0.05)))
 
     def _draw_hint(self, text):
-        t = self._fit(self.f_hint, text, DIM, self.W * 0.88)
-        self.surface.blit(t, (int(self.W * 0.06), self.H - t.get_height() - 20))
+        t = self._fit(self.f_hint, text, DIM, (self.W - self._ox) * 0.9)
+        self.surface.blit(t, (self._ox + int(self.W * 0.03 if self._ox
+                                             else self.W * 0.06),
+                              self.H - t.get_height() - 20))
 
     def _blit_center(self, surf, cy):
         self.surface.blit(surf, (self.W // 2 - surf.get_width() // 2, cy))
@@ -2123,7 +2227,7 @@ class App:
         """Current web-app URL, but only on the start page (where the QR is
         shown) and refreshed at most once every few seconds. Included in the
         redraw signature so a changed IP re-renders the QR promptly."""
-        if self.screen_state != SCREEN_PLAYLISTS:
+        if self.screen_state not in MENU_SCREENS:
             return ""
         now = time.time()
         if now - getattr(self, "_url_sig_checked", 0) > 3:
@@ -2159,159 +2263,75 @@ class App:
         self._qr_cache = (url, target_px, surf)
         return surf
 
-    def _start_rows(self):
-        """Return the start-page layout as a list of rows.
+    def _menu_w(self):
+        return int(self.W * 0.17)
 
-        Row 0 = [Movies, Series]. Each following row = up to two live
-        categories (2-column grid), filled left-to-right. Navigation is
-        grid-based: UP/DOWN move by row keeping the column, LEFT/RIGHT move
-        within a row.
-        """
-        pls = self.cfg.playlists
-        movies_i = next((i for i, p in enumerate(pls)
-                         if getattr(p, "is_movies", False)), None)
-        series_i = next((i for i, p in enumerate(pls)
-                         if getattr(p, "is_series", False)), None)
-        first = [i for i in (movies_i, series_i) if i is not None]
-        rows = [first] if first else []
-        cats = [i for i, p in enumerate(pls)
-                if not getattr(p, "is_movies", False)
-                and not getattr(p, "is_series", False)]
-        for k in range(0, len(cats), 2):
-            rows.append(cats[k:k + 2])
-        return rows
-
-    def _start_pos(self):
-        """Return (row, col) of the currently selected playlist on the start
-        page, plus the rows structure."""
-        rows = self._start_rows()
-        for r, row in enumerate(rows):
-            if self.pl_index in row:
-                return r, row.index(self.pl_index), rows
-        # default to first item
-        if rows and rows[0]:
-            self.pl_index = rows[0][0]
-            return 0, 0, rows
-        return 0, 0, rows
-
-    def _draw_playlists(self):
-        pls = self.cfg.playlists
-        if not pls:
-            msg = self.f_item.render("No channels configured. Edit config.yaml.",
-                                     True, DIM)
-            self.surface.blit(msg, (int(self.W * 0.06), int(self.H * 0.4)))
-            return
-        rows = self._start_rows()
-        top = int(self.H * 0.07)
-        gap = int(self.H * 0.028)
-        left = int(self.W * 0.06)
-        full_w = int(self.W * 0.88)
-        # First row (Movies + Series) is taller; other rows are single lines.
-        first_h = int(self.H * 0.24)
-        row_h = int(self.H * 0.105)
-
-        # QR code sits in the top-right, aligned to the Movies/Series row.
-        qr_left = self._draw_qr_panel(top, first_h)
-        first_area_w = qr_left - left
-
-        # how many category rows fit under the first row
-        avail = int(self.H * 0.90) - top - first_h - gap
-        max_cat_rows = max(1, avail // (row_h + gap))
-        sel_row, sel_col, _ = self._start_pos()
-        cat_rows = rows[1:]
-        cat_sel = sel_row - 1  # index into cat_rows, or -1 if on first row
-        start = 0
-        if cat_sel >= 0:
-            start = max(0, min(cat_sel - max_cat_rows // 2,
-                               max(0, len(cat_rows) - max_cat_rows)))
-
-        y = top
-        # --- first row: Movies + Series side by side (avoids the QR) ---
-        if rows and rows[0]:
-            fr = rows[0]
-            fcols = len(fr)
-            fgap = int(self.W * 0.02)
-            fcell_w = (first_area_w - fgap * (fcols - 1)) // fcols
-            for c, pi in enumerate(fr):
-                x = left + c * (fcell_w + fgap)
-                sel = (pi == self.pl_index)
-                self._button(x, y, fcell_w, first_h, pls[pi].name,
-                             self._playlist_subtitle(pls[pi]), sel)
-            y += first_h + gap
-
-        # --- two live categories per row (grid) ---
-        ccols = 2
-        cgap = int(self.W * 0.02)
-        ccell_w = (full_w - cgap * (ccols - 1)) // ccols
-        cbox_h = row_h - 10
-        for r in range(start, min(start + max_cat_rows, len(cat_rows))):
-            row = cat_rows[r]
-            for c, pi in enumerate(row):
-                x = left + c * (ccell_w + cgap)
-                self._cat_box(x, y, ccell_w, cbox_h, pls[pi],
-                              pi == self.pl_index)
-            y += row_h + gap
-        self._draw_hint("Use the arrows to move  -  OK to open")
-
-    def _cat_box(self, x, y, w, h, pl, selected):
-        """A live-category box: alias/name on the left, small count bottom-right."""
-        color = SELECT if selected else PANEL
-        pygame.draw.rect(self.surface, color, (x, y, w, h), border_radius=14)
-        tcol = SELECT_TEXT if selected else TEXT
-        # count as a small number in the bottom-right (half-size font)
-        n = len(pl.channels)
-        cnt_w = 0
-        if n:
-            cnt = self.f_count.render(str(n), True, SELECT_TEXT if selected else DIM)
-            cnt_w = cnt.get_width()
-            self.surface.blit(cnt, (x + w - cnt.get_width() - 14,
-                                    y + h - cnt.get_height() - 8))
-        # name on the left, truncated to leave room for the count
-        name = pl.display_name
-        max_w = w - 22 - cnt_w - 28
-        t = self._fit(self.f_item, name, tcol, max_w)
-        self.surface.blit(t, (x + 22, y + h // 2 - t.get_height() // 2))
-
-    @staticmethod
-    def _playlist_subtitle(pl):
-        if getattr(pl, "is_series", False):
-            n = len(getattr(pl, "series", []))
-            return "%d series" % n if n else "empty"
-        if getattr(pl, "is_movies", False):
-            n = len(pl.channels)
-            return "%d movies" % n if n else "empty"
-        return "%d channels" % len(pl.channels)
-
-    def _draw_qr_panel(self, top, height):
-        """Draw the QR code in the top-right, sized so its bottom aligns with
-        `top + height` (the bottom of the Movies/Series row). Returns the left
-        edge x of the reserved area so the first row avoids it."""
-        qr_px = height
+    def _draw_menu(self):
+        """Thin permanent menu on the left: Live / Movies / Series, QR below."""
+        mw = self._menu_w()
+        pygame.draw.rect(self.surface, (20, 22, 31), (0, 0, mw, self.H))
+        pygame.draw.line(self.surface, PANEL, (mw - 1, 0), (mw - 1, self.H), 2)
+        pad = int(self.W * 0.01)
+        row_h = int(self.H * 0.115)
+        y = int(self.H * 0.06)
+        counts = {"live": "%d categories" % len(self._live_cats())}
+        for sec in ("movies", "series"):
+            pi = self._section_playlist(sec)
+            if pi is None:
+                counts[sec] = ""
+                continue
+            pl = self.cfg.playlists[pi]
+            k = len(pl.series) if sec == "series" else len(pl.channels)
+            counts[sec] = "%d %s" % (k, sec) if k else "empty"
+        for sec in SECTIONS:
+            cur = (sec == self.section)
+            focus = cur and self.menu_focus
+            rect = (pad, y, mw - 2 * pad, row_h - 10)
+            if focus:
+                pygame.draw.rect(self.surface, SELECT, rect, border_radius=12)
+            elif cur:
+                pygame.draw.rect(self.surface, PANEL, rect, border_radius=12)
+                pygame.draw.rect(self.surface, SELECT,
+                                 (pad, y + 8, 6, row_h - 26), border_radius=3)
+            tcol = SELECT_TEXT if (focus or cur) else DIM
+            t = self._fit(self.f_small, SECTION_LABELS[sec], tcol,
+                          mw - 2 * pad - 36)
+            self.surface.blit(t, (pad + 22, y + 8))
+            c = self._fit(self.f_hint, counts[sec],
+                          SELECT_TEXT if focus else DIM, mw - 2 * pad - 36)
+            self.surface.blit(c, (pad + 22, y + 8 + t.get_height()))
+            y += row_h
+        # QR code at the bottom of the menu
+        qr_px = mw - 4 * pad
+        cap = self.f_hint.render("Scan to control", True, DIM)
+        qy = self.H - cap.get_height() - 24 - qr_px - 16
         surf = self._qr_surface(qr_px)
-        right = self.W - int(self.W * 0.04)
-        x = right - qr_px
-        y = top
         if surf is not None:
+            qx = (mw - qr_px) // 2
             pygame.draw.rect(self.surface, (255, 255, 255),
-                             (x - 6, y - 6, qr_px + 12, qr_px + 12),
+                             (qx - 6, qy - 6, qr_px + 12, qr_px + 12),
                              border_radius=8)
             self.surface.blit(pygame.transform.scale(surf, (qr_px, qr_px)),
-                              (x, y))
-        return x - int(self.W * 0.025)
+                              (qx, qy))
+            self.surface.blit(cap, ((mw - cap.get_width()) // 2,
+                                    qy + qr_px + 14))
+        self._ox = mw
 
-    def _button(self, x, y, w, h, title, subtitle, selected):
-        color = SELECT if selected else PANEL
-        pygame.draw.rect(self.surface, color, (x, y, w, h), border_radius=18)
-        if selected:
-            pygame.draw.rect(self.surface, SELECT_TEXT, (x, y, w, h),
-                             width=3, border_radius=18)
-        tcol = SELECT_TEXT if selected else TEXT
-        t = self._fit(self.f_item, title, tcol, w - 60)
-        self.surface.blit(t, (x + 30, y + h // 2 - t.get_height()))
-        if subtitle:
-            s = self._fit(self.f_small, subtitle,
-                          SELECT_TEXT if selected else DIM, w - 60)
-            self.surface.blit(s, (x + 30, y + h // 2 + 6))
+    def _draw_playlists(self):
+        """Live section: tiles for the live categories."""
+        cats = self._live_cats()
+        pls = self.cfg.playlists
+
+        def get(k):
+            pl = pls[cats[k]]
+            pic = iptv_livepics.find(iptv_livepics.cat_key(pl.display_name))
+            return (pl.display_name, pic or "", False)
+        self._draw_poster_grid(
+            "Live", len(cats), get, self.live_sel,
+            "OK to open  -  Left for menu", cols=self.LIVE_COLS, rows=3,
+            aspect=16 / 9, colored=True, cover=True,
+            focused=not self.menu_focus,
+            empty="No live categories configured (see Settings in the app).")
 
     def _load_thumb_surface(self, url):
         """Return a cached pygame surface for a channel's thumbnail, or None.
@@ -2379,10 +2399,11 @@ class App:
         chans = self.current_playlist.channels
         if self.current_playlist.is_movies:
             self._draw_poster_grid(
-                self.current_playlist.display_name,
-                [(c.name, c.logo, self.movies.is_watched(c.url)) for c in chans],
-                self.ch_index, "OK to watch  -  Back to lists",
-                empty="No movies added yet.")
+                self.current_playlist.display_name, len(chans),
+                lambda k: (chans[k].name, chans[k].logo,
+                           self.movies.is_watched(chans[k].url)),
+                self.ch_index, "OK to watch  -  Left for menu",
+                empty="No movies added yet.", focused=not self.menu_focus)
             return
         self._draw_header(self.current_playlist.display_name)
         top = int(self.H * 0.18)
@@ -2417,82 +2438,30 @@ class App:
         self._draw_hint(hint)
 
     def _draw_channels_grid(self):
-        title = self.current_playlist.display_name
+        """Live category: picture grid of all channels (uploaded picture,
+        grabbed frame, or a colored square)."""
+        chans = self.current_playlist.channels
+        sub = ""
         if self.thumbs.is_scanning():
-            title += "   (scanning %d/%d)" % (self.thumbs.done, self.thumbs.total)
-        self._draw_header(title, font=self.f_grid_header)
-        grid = self._grid_channels()      # only channels with a valid thumbnail
-        gn = len(grid)
-        cols = self._thumb_cols()
-        rows_visible = 3                  # always show three rows
-        left = int(self.W * 0.05)
-        top = int(self.H * 0.15)
-        gap = int(self.W * 0.012)
-        area_w = int(self.W * 0.90)
-        # Fit exactly `rows_visible` rows in the available vertical space.
-        area_h = int(self.H * 0.78) - top
-        label_h = int(self.H * 0.035)
-        vgap = int(self.H * 0.02)
-        cell_h = (area_h - vgap * (rows_visible - 1)) // rows_visible
-        img_h = cell_h - label_h
-        # derive the thumbnail width from its 16:9 image height, then columns
-        cell_w = (area_w - gap * (cols - 1)) // cols
-        # if 16:9 at cell_w would be taller than img_h, shrink to fit height
-        if int(cell_w * 9 / 16) > img_h:
-            cell_w = int(img_h * 16 / 9)
-        per_page = cols * rows_visible
+            sub = "(scanning %d/%d)" % (self.thumbs.done, self.thumbs.total)
 
-        if gn == 0:
-            if self.thumbs.is_scanning():
-                msg = self.f_item.render("Looking for channels with a picture...",
-                                         True, DIM)
-            else:
-                msg = self.f_item.render("No channel pictures available.",
-                                         True, DIM)
-            self.surface.blit(msg, (left, int(self.H * 0.45)))
-            self._draw_hint("Back for the channel list")
-            return
-
-        gi = min(getattr(self, "_grid_index", 0), gn - 1)
-        page = gi // per_page
-        start = page * per_page
-        for pos in range(start, min(start + per_page, gn)):
-            orig_i, chan = grid[pos]
-            rel = pos - start
-            r = rel // cols
-            c = rel % cols
-            x = left + c * (cell_w + gap)
-            y = top + r * (cell_h + vgap)
-            sel = (pos == gi)
-            border = SELECT if sel else PANEL
-            pygame.draw.rect(self.surface, border, (x - 3, y - 3, cell_w + 6,
-                             img_h + label_h + 6), border_radius=10)
-            surf = self._load_thumb_surface(chan.url)
-            if surf is not None:
-                thumb = pygame.transform.smoothscale(surf, (cell_w, img_h))
-                self.surface.blit(thumb, (x, y))
-            else:
-                pygame.draw.rect(self.surface, (10, 12, 18), (x, y, cell_w, img_h),
-                                 border_radius=8)
-            # channel label, trimmed to fit the cell width
-            nm = chan.name
+        def get(k):
+            c = chans[k]
+            pic = iptv_livepics.find(iptv_livepics.chan_key(c.url))
+            if not pic and iptv_thumbs.has_thumb(c.url):
+                pic = iptv_thumbs.thumb_path(c.url)
+            nm = c.name
             # drop a leading provider prefix like "NO: " to save space
-            if len(nm) > 4 and nm[:4].upper().startswith(("NO:", "UK:", "DK:",
-                                                          "SE:", "US:", "DE:")):
+            if len(nm) > 4 and nm[:4].upper().startswith(
+                    ("NO:", "UK:", "DK:", "SE:", "US:", "DE:")):
                 nm = nm.split(":", 1)[1].strip()
-            label = self.f_grid_label.render(nm, True,
-                                             SELECT_TEXT if sel else TEXT)
-            if label.get_width() > cell_w - 8:
-                while nm and self.f_grid_label.size(nm + "..")[0] > cell_w - 8:
-                    nm = nm[:-1]
-                nm = nm.rstrip() + ".."
-                label = self.f_grid_label.render(nm, True,
-                                                 SELECT_TEXT if sel else TEXT)
-            self.surface.blit(label, (x + 4, y + img_h + 3))
-        total_pages = (gn + per_page - 1) // per_page
-        hint = ("OK to watch  -  Menu to refresh pictures  -  Back for list"
-                "   (page %d/%d)" % (page + 1, max(1, total_pages)))
-        self._draw_hint(hint)
+            return (nm, pic or "", False)
+        self._draw_poster_grid(
+            self.current_playlist.display_name, len(chans), get, self.ch_index,
+            "OK to watch  -  Menu to refresh pictures  -  Back for categories",
+            cols=self._thumb_cols(), rows=3, aspect=16 / 9, colored=True,
+            cover=True, focused=not self.menu_focus, subtitle=sub,
+            empty="No channels in this category.")
 
     def _draw_message(self):
         if time.time() > self.message_until or not self.message:
@@ -2641,6 +2610,8 @@ class App:
                 time.sleep(2)
             self.remote.q.put("__first_run__")
         threading.Thread(target=_first_run_check, daemon=True).start()
+        if not self.cfg.autoplay_first:
+            self._enter_section()      # start on the last used section
         if self.cfg.autoplay_first and self.cfg.playlists \
                 and self.screen_state == SCREEN_PLAYLISTS:
             self.open_playlist(0)
@@ -2831,6 +2802,8 @@ class App:
                        self.current_series["name"] if self.current_series else "",
                        self.current_playlist.name if self.current_playlist else "",
                        self.show_thumbs, iptv_posters.version,
+                       self.section, self.menu_focus, self.live_sel,
+                       iptv_livepics.dir_stamp(),
                        getattr(self, "_grid_index", 0),
                        self.scan_menu, self.sm_index,
                        self.thumbs.done if self.thumbs.is_scanning() else -1,

@@ -125,6 +125,33 @@ class ControlServer:
                 self.wfile.write(body)
 
             # ---- GET ----
+            def _handle_livepic_post(self, path, raw):
+                import iptv_livepics, iptv_remote
+                try:
+                    if iptv_remote.from_vpn(self.client_address[0]):
+                        self._send(403, {"error": "Change pictures from home"})
+                        return
+                except Exception:
+                    pass
+                parts = path.split("/")          # ['', 'api', 'livepic', key, action]
+                key = parts[3] if len(parts) > 3 else ""
+                action = parts[4] if len(parts) > 4 else ""
+                if not iptv_livepics.KEY_RE.match(key):
+                    self._send(400, {"error": "bad key"})
+                    return
+                try:
+                    if action == "upload":
+                        iptv_livepics.save(key, raw)
+                    elif action == "delete":
+                        iptv_livepics.delete(key)
+                    else:
+                        self._send(404, {"error": "not found"})
+                        return
+                except ValueError as e:
+                    self._send(400, {"error": str(e)})
+                    return
+                self._send(200, {"ok": True})
+
             def _handle_remote(self, path, raw):
                 import iptv_remote
                 try:
@@ -222,6 +249,25 @@ class ControlServer:
                         iptv_stream.hls_serve(self, parts[2], parts[3])
                     else:
                         self._send(404, {"error": "not found"})
+                    return
+                if path == "/api/livepic/list":
+                    import iptv_livepics
+                    self._send(200, {"keys": iptv_livepics.keys()})
+                    return
+                if path.startswith("/api/livepic/"):
+                    import iptv_livepics
+                    fp = iptv_livepics.find(path.rsplit("/", 1)[-1].split(".")[0])
+                    if not fp:
+                        self._send(404, {"error": "no picture"})
+                        return
+                    with open(fp, "rb") as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(data)
                     return
                 if path.startswith("/api/poster/"):
                     import iptv_stream, iptv_posters
@@ -329,7 +375,14 @@ class ControlServer:
             def do_POST(self):
                 path = self.path.split("?")[0]
                 length = int(self.headers.get("Content-Length", 0) or 0)
+                if length > 8 * 1024 * 1024:
+                    self.close_connection = True
+                    self._send(413, {"error": "File too large"})
+                    return
                 raw = self.rfile.read(length) if length else b""
+                if path.startswith("/api/livepic/"):
+                    self._handle_livepic_post(path, raw)
+                    return
                 if path.startswith("/api/remote/"):
                     self._handle_remote(path, raw)
                     return
@@ -1150,6 +1203,29 @@ PAGE = r"""<!DOCTYPE html>
       </div>
     </div>
 
+    <div class="card" id="lpCard">
+      <h2>Live thumbnails</h2>
+      <div class="pnote">Choose a live category (or one channel in it) and upload a picture
+        for its tile on the TV. Without a picture a colored square is shown.</div>
+      <label>Category</label>
+      <select id="lpCat"></select>
+      <label>Channel (optional)</label>
+      <input type="text" id="lpFilter" placeholder="Filter channels by name" style="margin-bottom:.3rem">
+      <select id="lpChan"></select>
+      <div style="display:flex;gap:.8rem;align-items:center;margin-top:.7rem">
+        <div id="lpPrev" style="width:160px;height:90px;border-radius:8px;background:#0c0e14;
+             display:flex;align-items:center;justify-content:center;color:var(--dim);
+             font-size:.75rem;overflow:hidden;text-align:center">no picture</div>
+        <div style="flex:1">
+          <input type="file" id="lpFile" accept="image/*">
+        </div>
+      </div>
+      <div style="display:flex;gap:.5rem;margin-top:.6rem">
+        <button class="ghost" id="lpUp" style="flex:1">Upload</button>
+        <button class="ghost" id="lpDel" style="flex:1">Remove picture</button>
+      </div>
+    </div>
+
     <div class="card" id="updCard">
       <h2>Software updates</h2>
       <div id="updStatus" class="pnote"></div>
@@ -1255,7 +1331,7 @@ document.querySelectorAll('.tab[data-tab]').forEach(t=>{
     t.classList.add('active');
     document.querySelectorAll('section').forEach(s=>s.classList.remove('active'));
     document.getElementById(t.dataset.tab).classList.add('active');
-    if(t.dataset.tab==='config'){ loadForm(); loadRemote(); loadUpdate(); }
+    if(t.dataset.tab==='config'){ loadForm(); loadRemote(); loadUpdate(); loadLivePics(); }
     if(t.dataset.tab==='play') loadPlay();
     else stopPlayer();
   });
@@ -1603,6 +1679,58 @@ $('wifiSetupBtn').onclick=async()=>{
   showMsg(true,'Look at the TV to finish Wi-Fi setup.');
 };
 loadRemotes();
+
+// ---- Live thumbnails ----
+let LP={live:[],have:new Set()};
+function lpKey(){
+  const ci=$('lpCat').value; const cat=LP.live[ci]; if(!cat) return '';
+  const ch=$('lpChan').value;
+  return ch?('c'+ch):cat.key;
+}
+async function lpRefreshHave(){
+  try{ const d=await (await fetch('/api/livepic/list')).json(); LP.have=new Set(d.keys||[]); }catch(e){}
+}
+function lpFillChans(){
+  const cat=LP.live[$('lpCat').value]; const q=$('lpFilter').value.trim().toLowerCase();
+  const sel=$('lpChan'); sel.innerHTML='';
+  const o0=document.createElement('option'); o0.value=''; o0.textContent='(the whole category)'; sel.appendChild(o0);
+  if(cat) cat.channels.filter(c=>!q||c.name.toLowerCase().includes(q)).slice(0,500).forEach(c=>{
+    const o=document.createElement('option'); o.value=c.id; o.textContent=c.name+(LP.have.has('c'+c.id)?'  \u2713':''); sel.appendChild(o); });
+  lpPreview();
+}
+function lpPreview(){
+  const k=lpKey(), box=$('lpPrev'); box.textContent='no picture';
+  $('lpDel').disabled=!LP.have.has(k);
+  if(k && LP.have.has(k)){ const i=document.createElement('img'); i.style.cssText='width:100%;height:100%;object-fit:cover';
+    i.src='/api/livepic/'+k+'.jpg?t='+Date.now(); box.textContent=''; box.appendChild(i); }
+}
+async function loadLivePics(){
+  let d; try{ d=await (await fetch('/api/play/catalog')).json(); }catch(e){ return; }
+  LP.live=d.live||[]; await lpRefreshHave();
+  const sel=$('lpCat'); const keep=sel.value; sel.innerHTML='';
+  LP.live.forEach((c,i)=>{ const o=document.createElement('option'); o.value=i;
+    o.textContent=c.name+(LP.have.has(c.key)?'  \u2713':''); sel.appendChild(o); });
+  if(keep) sel.value=keep;
+  lpFillChans();
+}
+$('lpCat').onchange=()=>{ $('lpFilter').value=''; lpFillChans(); };
+$('lpChan').onchange=lpPreview;
+$('lpFilter').oninput=lpFillChans;
+$('lpUp').onclick=async()=>{
+  const k=lpKey(), f=$('lpFile').files[0];
+  if(!k){ showMsg(false,'Choose a category first.'); return; }
+  if(!f){ showMsg(false,'Choose a picture file first.'); return; }
+  if(f.size>6*1024*1024){ showMsg(false,'The picture must be smaller than 6 MB.'); return; }
+  const r=await fetch('/api/livepic/'+k+'/upload',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:f});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok){ showMsg(true,'Picture saved.'); $('lpFile').value=''; await loadLivePics(); }
+  else showMsg(false,j.error||'Upload failed.');
+};
+$('lpDel').onclick=async()=>{
+  const k=lpKey(); if(!k) return;
+  const r=await fetch('/api/livepic/'+k+'/delete',{method:'POST'});
+  if(r.ok){ showMsg(true,'Picture removed.'); await loadLivePics(); }
+};
 
 // ---- Software updates ----
 async function loadUpdate(){

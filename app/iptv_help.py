@@ -54,23 +54,26 @@ HELP_PAGE = r"""<!DOCTYPE html>
 <tr><td>Arrows</td><td>Move around. Hold an arrow to scroll quickly (about 3 steps a second).</td></tr>
 <tr><td>OK</td><td>Open / play. While watching live TV: pause and resume. While watching a movie or episode: open the movie menu.</td></tr>
 <tr><td>BACK</td><td>Go back one step.</td></tr>
-<tr><td>HOME</td><td>Back to the start page.</td></tr>
-<tr><td>MENU</td><td>On the start page: open the menu. In a live channel list: refresh the channel pictures.</td></tr>
+<tr><td>HOME</td><td>Back to the start page (focus on the left menu).</td></tr>
+<tr><td>MENU</td><td>In the left menu: open the power/settings menu. In a live channel grid: refresh the channel pictures.</td></tr>
 <tr><td>VOL + / &minus;</td><td>Volume.</td></tr>
 <tr><td>POWER</td><td>Switches the box off and on (handled by the Argon case).</td></tr>
 </table>
-<p class="tip">On the start page, MENU, BACK or HOME open the menu: Add a remote, Wi-Fi setup,
+<p class="tip">While the left menu (Live / Movies / Series) is selected, MENU, BACK or HOME open the menu: Add a remote, Wi-Fi setup,
 Remote access, Instructions, Standby, Power off.</p>
 </section>
 
 <section id="tv"><h2>Using the TV</h2>
 <h3>Start page</h3>
-<p>Movies and Series are at the top; your live categories are below in two columns.
-The QR code in the corner opens this web app on a phone.</p>
+<p>A thin menu on the left is always shown: <b>Live</b>, <b>Movies</b> and <b>Series</b>, with the
+QR code at the bottom (it opens this web app on a phone). UP / DOWN in the menu changes the page;
+OK or RIGHT moves into the page, LEFT or BACK moves back to the menu. The box remembers the
+last section and starts there. <b>Live</b> shows your categories as picture tiles; open one to see its
+channels as pictures. Upload your own pictures under Settings &gt; Live thumbnails; otherwise a
+colored square is used.</p>
 <h3>Live TV</h3>
 <ul>
- <li><b>UP / DOWN</b>: previous / next channel. If you started from the picture grid,
-  only channels with a picture are used.</li>
+ <li><b>UP / DOWN</b>: previous / next channel.</li>
  <li><b>LEFT / RIGHT</b>: jump 30 seconds back / forward (within what the box has buffered).</li>
  <li><b>OK</b>: pause / resume.</li>
  <li><b>MENU</b> in a channel list shows channel pictures; choose to refresh all or only old/missing ones.</li>

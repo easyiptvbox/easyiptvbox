@@ -5,6 +5,8 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 26 October 2026
 
 **New**
+- New TV start page: a thin menu on the left (Live, Movies, Series, with the QR code at the bottom) is always shown. The box remembers the last section and starts there (Live the first time).
+- **Live** now shows picture tiles for categories and channels. Upload your own pictures in Settings > Live thumbnails; without one a colored square is used.
 - Movies and Series now show **posters** instead of text lists, on the TV (poster grid) and in the web app's Play tab (with a filter box). Posters come from your provider and are cached on the box; items without a picture show their title.
 - Software updates: the box now updates itself from GitHub (optional weekly check), with an **Update now** button and a version display in Settings.
 - Fresh-install script (`deploy/bootstrap.sh`) to set up a new Raspberry Pi with one command.

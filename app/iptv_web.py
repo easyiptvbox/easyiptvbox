@@ -1159,13 +1159,10 @@ PAGE = r"""<!DOCTYPE html>
 
     <div class="card" id="lpCard">
       <h2>Live thumbnails</h2>
-      <div class="pnote">Choose a live category (or one channel in it) and upload a picture
-        for its tile on the TV. Without a picture a colored square is shown.</div>
+      <div class="pnote">Choose a live category and upload a picture for its tile on the TV.
+        Channel pictures are made automatically by the picture scan. Without a picture a colored square is shown.</div>
       <label>Category</label>
       <select id="lpCat"></select>
-      <label>Channel (optional)</label>
-      <input type="text" id="lpFilter" placeholder="Filter channels by name" style="margin-bottom:.3rem">
-      <select id="lpChan"></select>
       <div style="display:flex;gap:.8rem;align-items:center;margin-top:.7rem">
         <div id="lpPrev" style="width:160px;height:90px;border-radius:8px;background:var(--tilebg);
              display:flex;align-items:center;justify-content:center;color:var(--dim);
@@ -1720,20 +1717,10 @@ $('themeSel').addEventListener('change',()=>{ document.documentElement.dataset.t
 // ---- Live thumbnails ----
 let LP={live:[],have:new Set()};
 function lpKey(){
-  const ci=$('lpCat').value; const cat=LP.live[ci]; if(!cat) return '';
-  const ch=$('lpChan').value;
-  return ch?('c'+ch):cat.key;
+  const cat=LP.live[$('lpCat').value]; return cat?cat.key:'';
 }
 async function lpRefreshHave(){
   try{ const d=await (await fetch('/api/livepic/list')).json(); LP.have=new Set(d.keys||[]); }catch(e){}
-}
-function lpFillChans(){
-  const cat=LP.live[$('lpCat').value]; const q=$('lpFilter').value.trim().toLowerCase();
-  const sel=$('lpChan'); sel.innerHTML='';
-  const o0=document.createElement('option'); o0.value=''; o0.textContent='(the whole category)'; sel.appendChild(o0);
-  if(cat) cat.channels.filter(c=>!q||c.name.toLowerCase().includes(q)).slice(0,500).forEach(c=>{
-    const o=document.createElement('option'); o.value=c.id; o.textContent=c.name+(LP.have.has('c'+c.id)?'  \u2713':''); sel.appendChild(o); });
-  lpPreview();
 }
 function lpPreview(){
   const k=lpKey(), box=$('lpPrev'); box.textContent='no picture';
@@ -1748,11 +1735,9 @@ async function loadLivePics(){
   LP.live.forEach((c,i)=>{ const o=document.createElement('option'); o.value=i;
     o.textContent=c.name+(LP.have.has(c.key)?'  \u2713':''); sel.appendChild(o); });
   if(keep) sel.value=keep;
-  lpFillChans();
+  lpPreview();
 }
-$('lpCat').onchange=()=>{ $('lpFilter').value=''; lpFillChans(); };
-$('lpChan').onchange=lpPreview;
-$('lpFilter').oninput=lpFillChans;
+$('lpCat').onchange=lpPreview;
 function lpMsg(ok,t){ const m=$('lpMsg'); m.textContent=t; m.style.color=ok?'var(--oktx)':'var(--errtx)'; }
 $('lpUp').onclick=async()=>{
   const k=lpKey(), f=$('lpFile').files[0];

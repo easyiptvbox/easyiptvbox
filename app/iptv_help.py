@@ -153,8 +153,10 @@ watch history. Provider login, TV guide, audio sync, remotes, Wi-Fi and updates 
   a protected profile asks for its PIN with the arrows and OK.</li>
  <li><b>Play on TV</b> from the web app switches the TV to the profile you are using in the web app.</li>
 </ul>
-<p class="tip">A PIN is a soft lock: it keeps others out of a profile but is not real security, because anyone on your
-network can open the web app.</p>
+<p class="tip">A protected profile cannot be opened, edited or played from the TV or from the web app without its PIN
+(the box checks it, and 5 wrong tries lock the profile for 30 seconds). It is meant to keep family members out of each
+other's profiles. It is not strong security: the PIN is only 4 to 6 digits, the data is not encrypted on the box, and
+the provider login in the Default profile is shared by all profiles.</p>
 </section>
 
 <section id="appearance"><h2>Appearance</h2>

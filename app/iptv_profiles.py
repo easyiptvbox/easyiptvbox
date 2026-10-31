@@ -11,8 +11,10 @@ profiles/<id>/ :
 Provider login, TV guide, audio sync, remotes, Wi-Fi etc. are shared by the
 whole box (they stay in the Default config.yaml).
 
-A PIN is a soft lock (4-6 digits, salted hash). The web app has no login, so
-it only keeps people out of a profile, it does not protect secrets.
+A PIN (4-6 digits, salted hash) is checked by the box before a protected
+profile can be opened on the TV or used through the web app. It keeps family
+members apart but is not strong security: short PIN, unencrypted data on the
+box, and the provider login is shared.
 """
 import hashlib
 import hmac

@@ -1613,6 +1613,8 @@ class App:
                 return
             self._start_movie(start=0)
             return
+        self._idle_tries = 0
+        self._idle_since = 0
         self._launch(self.current_channel.url, live=True)
         self.screen_state = SCREEN_PLAYING
         self.overlay_until = 0
@@ -2792,6 +2794,40 @@ class App:
                                 self.notify("Recovering playback...", 2)
                                 self._launch(self.current_channel.url, live=True)
                                 self.screen_state = SCREEN_PLAYING
+
+            # Live stream that never started or ended while mpv stays alive
+            # (--idle=yes): the screen would stay black. Retry, then give up.
+            if (self.screen_state == SCREEN_PLAYING and self.player.is_running()
+                    and not self.is_movie_playing() and self.current_channel):
+                now = time.time()
+                if now - getattr(self, "_last_idle_check", 0) > 2:
+                    self._last_idle_check = now
+                    if self.player.get_property("idle-active", False) is True:
+                        since = getattr(self, "_idle_since", 0) or now
+                        self._idle_since = since
+                        if now - since > 12:
+                            self._idle_since = 0
+                            self._idle_tries = getattr(self, "_idle_tries", 0) + 1
+                            if self._idle_tries <= 3:
+                                self.notify("Stream stopped - retrying...", 3)
+                                self._launch(self.current_channel.url, live=True)
+                                self.screen_state = SCREEN_PLAYING
+                            else:
+                                self._idle_tries = 0
+                                self.player.stop()
+                                self._acquire_display()
+                                self.screen_state = SCREEN_CHANNELS
+                                self.notify("Stream not available", 5)
+                                self._resume_scan()
+                    else:
+                        self._idle_since = 0
+                        if getattr(self, "_idle_ok_since", 0) == 0:
+                            self._idle_ok_since = now
+                        elif now - self._idle_ok_since > 60:
+                            self._idle_tries = 0
+            else:
+                self._idle_since = 0
+                self._idle_ok_since = 0
 
             # if video died unexpectedly, fall back to menu
             if self.screen_state == SCREEN_PLAYING and not self.player.is_running():

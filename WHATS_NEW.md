@@ -19,6 +19,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - Movies can be streamed to your phone/computer (Safari player, VLC, download).
 
 **Changed**
+- The picture-scan text now shows which page is being scanned ("Scanning pictures on page 2/21") instead of a channel count.
 - The picture-scan progress ("Scanning pictures 34/208") is now a small text at the bottom left instead of next to the category name.
 - Opening a live category now automatically refreshes only old or missing channel pictures.
 - Cleaner TV pages: no selected-title line, no caption under the QR code and no hint text at the bottom; only a small "1/3" page number with an arrow in the bottom right corner when there is more than one page.

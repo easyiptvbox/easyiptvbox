@@ -2495,7 +2495,11 @@ class App:
         chans = self.current_playlist.channels
         sub = ""
         if self.thumbs.is_scanning():
-            sub = "Scanning pictures %d/%d" % (self.thumbs.done, self.thumbs.total)
+            per = self._thumb_cols() * 3
+            cur = getattr(self.thumbs, "current", None)
+            idx = next((i for i, c in enumerate(chans) if c.url == cur), 0)
+            sub = "Scanning pictures on page %d/%d" % (
+                idx // per + 1, max(1, (len(chans) + per - 1) // per))
 
         def get(k):
             c = chans[k]

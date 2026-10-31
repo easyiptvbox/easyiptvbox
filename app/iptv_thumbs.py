@@ -207,6 +207,7 @@ class ThumbScanner:
         self.total = 0
         self.done = 0
         self.active = False
+        self.current = None     # url being grabbed right now
 
     def is_scanning(self):
         return self.active
@@ -231,6 +232,7 @@ class ThumbScanner:
             for u in todo:
                 if self._stop.is_set() or gen != self._gen:
                     break
+                self.current = u
                 _grab_one(u)
                 # re-check after the (slow) grab: a stop()/new scan may have
                 # happened while we were fetching, so don't touch shared state.

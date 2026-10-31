@@ -140,6 +140,8 @@ series lists are downloaded again (only while nothing is playing). Saved searche
 </section>
 
 <section id="appearance"><h2>Appearance</h2>
+<p><b>Theme</b>: Dark or Light. It applies to both the web app and the TV, and is saved with
+the other settings (press <b>Save &amp; Apply</b>).</p>
 <p><b>Text size on the TV</b>: Small, Normal, Large or Extra large. Text that is still too
 long is shrunk to fit, and shortened with &ldquo;&hellip;&rdquo; as a last resort.</p>
 </section>

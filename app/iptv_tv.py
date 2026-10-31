@@ -79,6 +79,27 @@ SELECT_TEXT = (255, 255, 255)
 TEXT = (225, 228, 235)
 DIM = (140, 145, 160)
 ACCENT = (90, 200, 120)
+MENU_BG = (20, 22, 31)
+TILE_BG = (10, 12, 18)
+POPUP_BG = (28, 31, 43, 250)
+
+THEMES = {
+    "dark": dict(BG=(18, 20, 28), PANEL=(30, 33, 45), SELECT=(0, 122, 204),
+                 SELECT_TEXT=(255, 255, 255), TEXT=(225, 228, 235),
+                 DIM=(140, 145, 160), ACCENT=(90, 200, 120),
+                 MENU_BG=(20, 22, 31), TILE_BG=(10, 12, 18),
+                 POPUP_BG=(28, 31, 43, 250)),
+    "light": dict(BG=(243, 245, 249), PANEL=(224, 229, 238), SELECT=(0, 105, 180),
+                  SELECT_TEXT=(255, 255, 255), TEXT=(28, 34, 48),
+                  DIM=(95, 104, 120), ACCENT=(30, 140, 75),
+                  MENU_BG=(230, 234, 242), TILE_BG=(205, 211, 224),
+                  POPUP_BG=(255, 255, 255, 250)),
+}
+
+
+def set_theme(name):
+    """Switch the TV colours (same setting as the web app's theme)."""
+    globals().update(THEMES.get(name, THEMES["dark"]))
 
 SPLASH_DIR = "/usr/share/plymouth/themes/easyiptvbox"
 SPLASH_BOOT = os.path.join(SPLASH_DIR, "splash.png")
@@ -107,6 +128,7 @@ SCREEN_WIFI_CONNECT = "wifi_connect"  # connecting / result
 class App:
     def __init__(self):
         self.cfg = load_config()
+        set_theme(self.cfg.theme)
         self.player = Player()
         self.remote = ir.RemoteInput()
         self.epg = EPG(self.cfg.epg_sources, self.cfg.epg_refresh_hours)
@@ -1533,6 +1555,7 @@ class App:
         except Exception as e:
             self.notify("Config error: %s" % e, 5)
             return
+        set_theme(self.cfg.theme)
         self._load_fonts()
         self.epg = EPG(self.cfg.epg_sources, self.cfg.epg_refresh_hours)
         self.pl_index = 0
@@ -1910,7 +1933,7 @@ class App:
                 self._text_tile(tile, name, iptv_livepics.color_for(name),
                                 SELECT_TEXT)
             else:
-                self._text_tile(tile, name, (10, 12, 18), DIM)
+                self._text_tile(tile, name, TILE_BG, DIM)
             if watched:
                 pygame.draw.rect(self.surface, ACCENT, tile, width=4,
                                  border_radius=8)
@@ -2301,7 +2324,7 @@ class App:
     def _draw_menu(self):
         """Thin permanent menu on the left: Live / Movies / Series, QR below."""
         mw = self._menu_w()
-        pygame.draw.rect(self.surface, (20, 22, 31), (0, 0, mw, self.H))
+        pygame.draw.rect(self.surface, MENU_BG, (0, 0, mw, self.H))
         pygame.draw.line(self.surface, PANEL, (mw - 1, 0), (mw - 1, self.H), 2)
         pad = int(self.W * 0.01)
         row_h = int(self.H * 0.115)
@@ -2325,7 +2348,7 @@ class App:
                 pygame.draw.rect(self.surface, PANEL, rect, border_radius=12)
                 pygame.draw.rect(self.surface, SELECT,
                                  (pad, y + 8, 6, row_h - 26), border_radius=3)
-            tcol = SELECT_TEXT if (focus or cur) else DIM
+            tcol = SELECT_TEXT if focus else (TEXT if cur else DIM)
             t = self._fit(self.f_small, SECTION_LABELS[sec], tcol,
                           mw - 2 * pad - 36)
             self.surface.blit(t, (pad + 22, y + 8))
@@ -2406,7 +2429,7 @@ class App:
         px = self.W // 2 - pw // 2
         py = self.H // 2 - ph // 2
         panel = pygame.Surface((pw, ph), pygame.SRCALPHA)
-        panel.fill((28, 31, 43, 250))
+        panel.fill(POPUP_BG)
         self.surface.blit(panel, (px, py))
         self.surface.blit(title, (px + 30, py + 20))
         top = py + int(self.H * 0.10)

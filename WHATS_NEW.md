@@ -5,7 +5,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 26 October 2026
 
 **New**
-- **Light theme** for the web app: Settings > Appearance lets you choose Automatic (follows your phone/computer), Dark or Light. The choice is remembered per device.
+- **Light theme** for the web app and the TV: Settings > Appearance > Theme (Dark or Light). One setting for both, saved with the other settings (Save & Apply).
 - The web app's **Play** tab now shows pictures too, in the same order as the TV (Movies, Live, Series): live categories and channels are tiles with your uploaded picture or a colored square.
 - New TV start page: a thin menu on the left (Movies, Live, Series, with the QR code at the bottom) is always shown. The box remembers the last section and starts there (Live the first time).
 - **Live** now shows picture tiles for categories and channels. Upload your own pictures in Settings > Live thumbnails; without one a colored square is used.

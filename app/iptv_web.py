@@ -50,6 +50,17 @@ def _update_status():
     return st
 
 
+def _current_theme():
+    """The box-wide theme (shared by the web app and the TV)."""
+    try:
+        import yaml
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+            st = (yaml.safe_load(f) or {}).get("settings") or {}
+        return "light" if str(st.get("theme", "dark")) == "light" else "dark"
+    except Exception:
+        return "dark"
+
+
 CONFIG_PATH = os.environ.get("IPTV_CONFIG", os.path.join(APP_DIR, "config.yaml"))
 
 # Map web button names -> action constants understood by the app
@@ -333,7 +344,8 @@ class ControlServer:
                         "busy": iptv_stream.busy()})
                     return
                 if path in ("/", "/index.html"):
-                    self._send(200, PAGE, "text/html; charset=utf-8")
+                    self._send(200, PAGE.replace("__THEME__", _current_theme()),
+                               "text/html; charset=utf-8")
                 elif path == "/api/status":
                     self._send(200, outer.status)
                 elif path == "/api/config":
@@ -781,6 +793,7 @@ def build_config_yaml(data):
         "playlists": [],
         "settings": {
             "text_size": s(settings.get("text_size", "large")) or "large",
+            "theme": "light" if s(settings.get("theme", "dark")) == "light" else "dark",
             "audio_delay_ms": _num(settings.get("audio_delay_ms", 0), 0),
         },
     }
@@ -921,7 +934,7 @@ PAGE = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
-<script>(function(){var t=localStorage.getItem("theme")||"auto";if(t==="auto")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.dataset.theme=t;})();</script>
+<script>document.documentElement.dataset.theme="__THEME__";</script>
 <title>TV Remote</title>
 <style>
   :root { --bg:#12141c; --panel:#1e2130; --accent:#007acc; --accent2:#5ac878;
@@ -1187,18 +1200,17 @@ PAGE = r"""<!DOCTYPE html>
 
     <div class="card">
       <h2><a class="hl" href="/help#appearance" target="_blank" rel="noopener">Appearance <span class="hi">?</span></a></h2>
+      <label>Theme (web app and TV)</label>
+      <select id="themeSel">
+        <option value="dark">Dark</option>
+        <option value="light">Light</option>
+      </select>
       <label>Text size on the TV</label>
       <select id="textSize">
         <option value="small">Small</option>
         <option value="normal">Normal</option>
         <option value="large">Large</option>
         <option value="extra_large">Extra large</option>
-      </select>
-      <label>Appearance (this device)</label>
-      <select id="themeSel">
-        <option value="auto">Automatic (follow the device)</option>
-        <option value="dark">Dark</option>
-        <option value="light">Light</option>
       </select>
     </div>
 
@@ -1482,6 +1494,7 @@ async function loadForm(){
   $('epgSources').value=(epg.sources||[]).join('\n');
   $('epgRefresh').value=epg.refresh_hours||96;
   $('textSize').value=st.text_size||'large';
+  $('themeSel').value=st.theme||'dark';
   $('audioDelay').value=(st.audio_delay_ms!==undefined&&st.audio_delay_ms!==null)?st.audio_delay_ms:0;
   PL=JSON.parse(JSON.stringify(d.playlists||[]));
   PL.forEach(p=>{p.channels=p.channels||[];});
@@ -1505,6 +1518,7 @@ function collectForm(){
     },
     settings:{
       text_size:$('textSize').value,
+      theme:$('themeSel').value,
       audio_delay_ms:parseInt($('audioDelay').value,10)||0,
     },
     playlists:PL,
@@ -1700,14 +1714,8 @@ $('wifiSetupBtn').onclick=async()=>{
 };
 loadRemotes();
 
-// ---- Theme ----
-function applyTheme(t){
-  localStorage.setItem('theme',t);
-  if(t==='auto') t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';
-  document.documentElement.dataset.theme=t;
-}
-$('themeSel').value=localStorage.getItem('theme')||'auto';
-$('themeSel').onchange=()=>applyTheme($('themeSel').value);
+// ---- Theme (shared with the TV; saved with the other settings) ----
+$('themeSel').addEventListener('change',()=>{ document.documentElement.dataset.theme=$('themeSel').value; });
 
 // ---- Live thumbnails ----
 let LP={live:[],have:new Set()};

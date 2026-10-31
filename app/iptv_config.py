@@ -56,6 +56,7 @@ class Config:
         self.refresh_hours = self.epg_refresh_hours
         s = self._data.get("settings") or {}
         self.text_scale = TEXT_SIZES.get(str(s.get("text_size", "large")), 1.3)
+        self.theme = "light" if str(s.get("theme", "dark")) == "light" else "dark"
         self.autoplay_first = bool(s.get("autoplay_first_channel", False))
         self.show_clock = bool(s.get("show_clock", True))
         # Live-TV audio sync offset, in seconds (config stores milliseconds).

@@ -88,6 +88,8 @@ class ControlServer:
         self.httpd = None
         # a snapshot the UI can show (set by the app)
         self.status = {"screen": "", "playlist": "", "channel": ""}
+        self.pending_tv = None       # {"kind","url","name","sid"} for "Play on TV"
+        self.pending_scan = []       # stream URLs to scan for pictures
 
     def start(self):
         handler = self._make_handler()
@@ -316,6 +318,24 @@ class ControlServer:
                     except Exception as e:
                         self._send(502, {"error": "Could not load episodes: %s" % e})
                     return
+                if path.startswith("/api/thumb/"):
+                    import iptv_stream, iptv_thumbs
+                    it = iptv_stream.resolve(path.rsplit("/", 1)[-1].split(".")[0],
+                                             "live")
+                    fp = (iptv_thumbs.thumb_path(it["url"])
+                          if it and iptv_thumbs.has_thumb(it["url"]) else None)
+                    if not fp:
+                        self._send(404, {"error": "no picture"})
+                        return
+                    with open(fp, "rb") as f:
+                        data = f.read()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(data)))
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    self.wfile.write(data)
+                    return
                 if path == "/api/play/state":
                     import iptv_stream
                     self._send(200, {"busy": iptv_stream.busy(),
@@ -413,6 +433,39 @@ class ControlServer:
                          "systemctl disable --now iptv-update.timer")],
                         capture_output=True, timeout=20)
                     self._send(200, {"ok": True, "auto": on})
+                    return
+                if path == "/api/play/tv":
+                    import iptv_stream
+                    try:
+                        d = json.loads(raw or b"{}")
+                    except Exception:
+                        d = {}
+                    kind = str(d.get("kind", ""))
+                    it = iptv_stream.resolve(str(d.get("id", "")), kind)
+                    if not it:
+                        self._send(404, {"error": "Not found"})
+                        return
+                    if iptv_stream.busy():
+                        self._send(409, {"error": "Another device is streaming "
+                                         "from the box. Stop it first."})
+                        return
+                    outer.pending_tv = {"kind": kind, "url": it["url"],
+                                        "name": it["name"],
+                                        "sid": str(d.get("sid", ""))}
+                    outer.q.put("__play_tv__")
+                    self._send(200, {"ok": True})
+                    return
+                if path == "/api/play/scan":
+                    import iptv_stream
+                    try:
+                        key = str(json.loads(raw or b"{}").get("key", ""))
+                    except Exception:
+                        key = ""
+                    urls = iptv_stream.live_category_urls(key)
+                    if urls:
+                        outer.pending_scan = urls
+                        outer.q.put("__scan_web__")
+                    self._send(200, {"ok": True, "channels": len(urls)})
                     return
                 if path == "/api/update/run":
                     import subprocess
@@ -1093,6 +1146,7 @@ PAGE = r"""<!DOCTYPE html>
       <video id="pv" controls playsinline preload="metadata"
              style="width:100%;max-height:60vh;background:#000;border-radius:10px"></video>
       <div id="pst" class="pnote"></div>
+      <a class="pbtn" id="ptv" href="#" style="background:var(--accent);color:#fff">Play on TV</a>
       <a class="pbtn" id="pvlc" href="#">Open in VLC</a>
       <a class="pbtn alt" id="pdl" href="#" download>Download to this device</a>
       <div class="pnote" id="pdlnote">Movies are large (often several GB). While a
@@ -1882,6 +1936,18 @@ function posterGrid(items,onpick,wide){
     box.style.marginBottom='.2rem'; wrap.appendChild(box);
   }
   const grid=document.createElement('div'); grid.className='pgrid'+(wide?' wide':''); wrap.appendChild(grid);
+  const failed=[];
+  // re-try tiles whose picture did not exist yet (the TV makes them in the background)
+  wrap.retryFailed=()=>{
+    failed.splice(0).forEach(f=>{
+      if(!document.body.contains(f.im)) return;
+      const i=new Image(); i.alt='';
+      i.onload=()=>{ f.im.textContent=''; f.im.style.background=''; f.im.appendChild(i);
+        i.style.cssText='width:100%;height:100%;object-fit:cover;display:block'; };
+      i.onerror=()=>{ failed.push(f); };
+      i.src=f.it.src+(f.it.src.includes('?')?'&':'?')+'t='+Date.now();
+    });
+  };
   const tiles=items.map(it=>{
     const b=document.createElement('button'); b.className='ptile'; b.type='button';
     const im=document.createElement('div'); im.className='pimg';
@@ -1889,9 +1955,9 @@ function posterGrid(items,onpick,wide){
       const sp=document.createElement('span'); sp.className='ptxt'; sp.textContent=it.name; if(!it.color) sp.style.color='var(--dim)'; im.appendChild(sp); };
     if(it.src){
       const i=document.createElement('img'); i.loading='lazy'; i.alt=''; i.src=it.src;
-      i.onerror=()=>{ i.remove(); fallback(); };
+      i.onerror=()=>{ i.remove(); fallback(); if(it.retry) failed.push({im,it,fallback}); };
       im.appendChild(i);
-    }else fallback();
+    }else{ fallback(); if(it.retry) failed.push({im,it,fallback}); }
     const nm=document.createElement('div'); nm.className='pname'; nm.textContent=it.name;
     b.appendChild(im); b.appendChild(nm);
     b.onclick=()=>{ tiles.forEach(t=>t.el.classList.remove('sel')); b.classList.add('sel'); onpick(it); };
@@ -1902,6 +1968,7 @@ function posterGrid(items,onpick,wide){
     tiles.forEach(t=>t.el.style.display=(!q||t.name.includes(q))?'':'none'); };
   return wrap;
 }
+let LIVETIMER=null, CURSID='';
 async function loadPlay(){
   let d;
   try{ const r=await fetch('/api/play/catalog'); d=await r.json(); }
@@ -1923,9 +1990,14 @@ async function loadPlay(){
     const b=document.createElement('button'); b.className='ghost'; b.type='button';
     b.textContent='\u2190 '+cat.name+' ('+cat.channels.length+')'; b.style.cssText='width:100%;margin-bottom:.3rem';
     b.onclick=showCats; live.appendChild(b);
-    live.appendChild(posterGrid(cat.channels.map(c=>({key:c.id,name:c.name,color:col(c.ci),
-      src:have.has('c'+c.id)?'/api/livepic/c'+c.id+'.jpg':'',c:c})),
-      it=>playItem('live',it.c.id,it.c.name,'ts'),true));
+    const g=posterGrid(cat.channels.map(c=>({key:c.id,name:c.name,color:col(c.ci),retry:true,
+      src:have.has('c'+c.id)?'/api/livepic/c'+c.id+'.jpg':'/api/thumb/'+c.id+'.jpg',c:c})),
+      it=>playItem('live',it.c.id,it.c.name,'ts'),true);
+    live.appendChild(g);
+    // ask the box to make pictures for this category (only while the TV is idle)
+    fetch('/api/play/scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:cat.key})}).catch(()=>{});
+    if(LIVETIMER) clearInterval(LIVETIMER);
+    LIVETIMER=setInterval(()=>{ if(!document.body.contains(g)){ clearInterval(LIVETIMER); LIVETIMER=null; return; } g.retryFailed(); },12000);
   };
   showCats();
   const mv=$('pmovies'); mv.innerHTML='';
@@ -1936,7 +2008,7 @@ async function loadPlay(){
   const se=$('pseries'); se.innerHTML=''; $('peps').innerHTML='';
   if((d.series||[]).length){
     se.appendChild(posterGrid(d.series.map(s=>({key:s.sid,name:s.name,src:s.poster?'/api/poster/'+s.poster+'.jpg':'',s:s})),
-      it=>loadEpisodes(it.s.sid)));
+      it=>{ CURSID=it.s.sid; loadEpisodes(it.s.sid); }));
   } else se.textContent='No series added under Settings.';
 }
 async function loadEpisodes(sid){
@@ -1951,6 +2023,7 @@ async function loadEpisodes(sid){
     box.appendChild(pSelect('Episode',groups,id=>playItem('episode',id,all[id].title,all[id].ext)));
   }catch(e){ box.textContent='Could not load episodes.'; }
 }
+let PCUR=null;
 function playItem(kind,id,name,ext){
   stopPlayer();
   const v=$('pv'), st=$('pst');
@@ -1970,6 +2043,7 @@ function playItem(kind,id,name,ext){
       encodeURIComponent('#EXTM3U\n#EXTINF:-1,'+name+'\n'+vsrc+'\n');
     $('pvlc').setAttribute('download',(name||'stream').replace(/[^A-Za-z0-9 _.-]+/g,'_').trim()+'.m3u');
   }
+  PCUR={kind:kind,id:id,sid:CURSID};
   const isLive=(kind==='live');
   $('pdl').style.display=isLive?'none':''; $('pdlnote').style.display=isLive?'none':'';
   $('pdl').href=src+'?dl=1'+(tq?'&'+tq:'');
@@ -1990,6 +2064,16 @@ function playItem(kind,id,name,ext){
   }
   $('pcard').scrollIntoView({behavior:'smooth'});
 }
+$('ptv').onclick=async(e)=>{
+  e.preventDefault(); if(!PCUR) return;
+  stopPlayer();
+  const st=$('pst');
+  try{
+    const r=await fetch('/api/play/tv',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(PCUR)});
+    const j=await r.json().catch(()=>({}));
+    st.textContent=r.ok?'Started on the TV.':(j.error||'Could not start on the TV.');
+  }catch(err){ st.textContent='Could not reach the box.'; }
+};
 (function(){
   const v=$('pv'), st=$('pst');
   v.addEventListener('playing',()=>st.textContent='');

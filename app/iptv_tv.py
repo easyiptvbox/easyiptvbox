@@ -1614,6 +1614,93 @@ class App:
         have = sum(1 for c in chans if iptv_thumbs.has_thumb(c.url))
         return have / len(chans)
 
+    def _play_on_tv(self, req):
+        """"Play on TV" from the web app: start a channel / movie / episode."""
+        if not req:
+            return
+        if self.screen_state == SCREEN_STANDBY:
+            self._wake_from_standby()
+        if self.screen_state in (SCREEN_LEARN, SCREEN_WIFI_LIST,
+                                 SCREEN_WIFI_KEYBOARD, SCREEN_WIFI_CONNECT,
+                                 SCREEN_REMOTE, SCREEN_HELP):
+            self.notify("Finish the setup on the TV first", 4)
+            return
+        if self._stream_busy():
+            return
+        if self.screen_state == SCREEN_PLAYING and self.is_movie_playing():
+            self._save_movie_position()
+        url, kind = req["url"], req["kind"]
+        pls = self.cfg.playlists
+        self.menu_focus = False
+        self.scan_menu = False
+        if kind == "episode":
+            sid = req.get("sid", "")
+            pi = self._section_playlist("series")
+            ser = None
+            if pi is not None:
+                ser = next((x for x in pls[pi].series
+                            if str(x["series_id"]) == sid), None)
+            if ser is None:
+                self.notify("Series not found on the TV", 4)
+                return
+            try:
+                from iptv_config import fetch_series_episodes
+                data = fetch_series_episodes(
+                    self.cfg._data.get("provider") or {}, sid,
+                    max_age_hours=getattr(self.cfg, "refresh_hours", 96))
+            except Exception:
+                self.notify("Could not load the series", 4)
+                return
+            seasons = data.get("seasons", [])
+            for si, se in enumerate(seasons):
+                for ei, ep in enumerate(se["episodes"]):
+                    if ep["url"] == url:
+                        self.current_playlist = pls[pi]
+                        self.current_series = ser
+                        self.current_seasons = seasons
+                        self.series_index = pls[pi].series.index(ser)
+                        self.open_season(si, back=(SCREEN_SEASONS
+                                                   if len(seasons) > 1
+                                                   else SCREEN_SERIES))
+                        self.section = "series"
+                        self._save_ui_state()
+                        self._play_from_saved(ep["title"], url, ep, ser)
+                        return
+            self.notify("Episode not found", 4)
+            return
+        for pi, pl in enumerate(pls):
+            if bool(getattr(pl, "is_series", False)):
+                continue
+            if bool(pl.is_movies) != (kind == "movie"):
+                continue
+            for ci, c in enumerate(pl.channels):
+                if c.url == url:
+                    self.pl_index = pi
+                    self.current_playlist = pl
+                    self.ch_index = ci
+                    self._grid_play = None
+                    self.show_thumbs = not pl.is_movies
+                    self.section = "movies" if pl.is_movies else "live"
+                    self._save_ui_state()
+                    if pl.is_movies:
+                        self.current_channel = c
+                        self._episode_return = SCREEN_CHANNELS
+                        rec = self.movies.get_position(c.url)
+                        pos = int(rec.get("pos", 0)) if rec else 0
+                        self._start_movie(start=pos if pos > 15 else 0)
+                    else:
+                        self.play_channel(ci)
+                    return
+        self.notify("Not found on the TV", 4)
+
+    def _play_from_saved(self, title, url, ep, ser):
+        from iptv_config import Channel
+        self.current_channel = Channel("%s - %s" % (ser["name"], title), url)
+        self._episode_return = SCREEN_EPISODES
+        rec = self.movies.get_position(url)
+        pos = int(rec.get("pos", 0)) if rec else 0
+        self._start_movie(start=pos if pos > 15 else 0)
+
     def _stream_busy(self):
         """True (and tells the user) if a phone/computer is streaming."""
         if iptv_stream.busy():
@@ -2500,9 +2587,10 @@ class App:
         if self.thumbs.is_scanning():
             per = self._thumb_cols() * 3
             cur = getattr(self.thumbs, "current", None)
-            idx = next((i for i, c in enumerate(chans) if c.url == cur), 0)
-            sub = "Scanning pictures on page %d/%d" % (
-                idx // per + 1, max(1, (len(chans) + per - 1) // per))
+            idx = next((i for i, c in enumerate(chans) if c.url == cur), None)
+            if idx is not None:
+                sub = "Scanning pictures on page %d/%d" % (
+                    idx // per + 1, max(1, (len(chans) + per - 1) // per))
 
         def get(k):
             c = chans[k]
@@ -2724,6 +2812,18 @@ class App:
                     else:
                         self.thumbs.stop()
                     self.notify("Playing on another device", 8)
+                elif a == "__scan_web__":
+                    # the web app's Play tab shows a live category: scan its
+                    # pictures, but only while the TV itself is idle
+                    urls = list(self.web.pending_scan or [])
+                    if (urls and self.screen_state not in (
+                            SCREEN_PLAYING, SCREEN_STANDBY)
+                            and not self.player.is_running()
+                            and not iptv_stream.busy()
+                            and not self.thumbs.is_scanning()):
+                        self.thumbs.start(urls)
+                elif a == "__play_tv__":
+                    self._play_on_tv(self.web.pending_tv)
                 elif a == "__remote_qr__":
                     # a device was just added in the web app: show its QR
                     if self.screen_state in (SCREEN_PLAYLISTS, SCREEN_CHANNELS,

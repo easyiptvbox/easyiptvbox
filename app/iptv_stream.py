@@ -135,6 +135,16 @@ def _registry():
         return items, cat
 
 
+def live_category_urls(key):
+    """Stream URLs of the channels in the live category with this key."""
+    items, cat = _registry()
+    for c in cat["live"]:
+        if c.get("key") == key:
+            return [items[ch["id"]]["url"] for ch in c["channels"]
+                    if ch["id"] in items]
+    return []
+
+
 def poster_url(pid):
     """Provider poster URL for a catalog poster id (only known ids)."""
     _registry()

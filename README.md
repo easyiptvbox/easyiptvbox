@@ -34,6 +34,19 @@ You get three tabs:
 > ONE case has one on GPIO23, already configured here, or add a cheap
 > TSOP38238/VS1838B module to GPIO23). Until then, use the web remote.
 
+## System requirements
+
+| | What you need |
+|---|---|
+| <img src="docs/img/pi5.jpg" width="160" alt="Raspberry Pi 5"> | **Raspberry Pi 5**, 4 GB RAM or more (8 GB is not needed). |
+| <img src="docs/img/sdcard.jpg" width="160" alt="microSD card"> | **microSD card**, 16 GB or larger (32 GB recommended, A1/A2 rated).<br>You also need a **USB card reader** and a **computer** to flash the system image onto the card (with Raspberry Pi Imager). |
+| <img src="docs/img/case.jpg" width="160" alt="Argon ONE case"> | **Argon ONE case**, with built-in fan, power button and IR receiver. |
+| <img src="docs/img/power.jpg" width="160" alt="USB-C power supply"> | **Official USB-C power supply** for the Raspberry Pi 5. |
+| <img src="docs/img/hdmi.jpg" width="160" alt="Micro HDMI cable"> | **Micro HDMI to HDMI cable** to connect the TV. |
+| <img src="docs/img/remote.jpg" width="160" alt="Argon IR remote"> | **Argon IR remote** (optional; the web remote works without it). |
+
+All of these can be bought at [raspberrypi.dk](https://raspberrypi.dk/en/).
+
 ## Fresh install (new Raspberry Pi 5)
 
 1. Flash **Raspberry Pi OS Lite (Trixie, arm64)** with Raspberry Pi Imager.

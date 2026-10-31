@@ -111,7 +111,7 @@ Without it VLC opens but shows an error. If VLC isn't listed, open the VLC app o
 <ul>
  <li>Type part of a title and press Search. All words must match, in any order
   (&ldquo;night summer&rdquo; finds &ldquo;Hot Summer Nights&rdquo;).</li>
- <li><b>Add</b> puts a movie in the Movies category on the TV. Remember <b>Save &amp; Apply</b>.</li>
+ <li><b>Add</b> puts a movie in the Movies category on the TV. It is saved automatically.</li>
  <li><b>Add future results automatically</b> (top of the results) saves the search. When the
   provider lists are renewed, new matches are added to Movies and the saved search is removed.</li>
  <li>Searches use the box's copy of the provider list, renewed every
@@ -120,7 +120,7 @@ Without it VLC opens but shows an error. If VLC isn't listed, open the VLC app o
 </section>
 
 <section id="series"><h2>TV series</h2>
-<p>Works like Movies: search, <b>Add</b>, then <b>Save &amp; Apply</b>. On the TV, open Series,
+<p>Works like Movies: search, then <b>Add</b> (saved automatically). On the TV, open Series,
 pick a series, a season and an episode. &ldquo;Add future results automatically&rdquo; works here too.</p>
 </section>
 
@@ -141,7 +141,7 @@ series lists are downloaded again (only while nothing is playing). Saved searche
 
 <section id="appearance"><h2>Appearance</h2>
 <p><b>Theme</b>: Dark or Light. It applies to both the web app and the TV, and is saved with
-the other settings (press <b>Save &amp; Apply</b>).</p>
+the other settings (changes are saved automatically).</p>
 <p><b>Text size on the TV</b>: Small, Normal, Large or Extra large. Text that is still too
 long is shrunk to fit, and shortened with &ldquo;&hellip;&rdquo; as a last resort.</p>
 </section>
@@ -220,7 +220,7 @@ its key stops working at once.</p>
 
 <section id="provider"><h2>IPTV provider</h2>
 <p>Enter the provider address and login. You can paste the full <code>get.php?username=&hellip;&amp;password=&hellip;</code>
-link instead; then the username and password fields can stay empty. Press <b>Save &amp; Apply</b>.</p>
+link instead; then the username and password fields can stay empty. It saves automatically.</p>
 <p class="tip">The provider allows one connection at a time: the TV, the Play tab and downloads share it.</p>
 </section>
 

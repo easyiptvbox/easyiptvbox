@@ -25,7 +25,7 @@ You get three tabs:
   other formats can be opened in **VLC** (a link or `.m3u` file is
   provided) and movies/episodes can be downloaded.
 - **Settings** — edit the whole configuration (channels, provider,
-  TV guide) right in the browser and press **Save & Apply**; the player
+  TV guide) right in the browser; changes are saved automatically and the player
   reloads automatically. Invalid YAML is rejected with an error and the
   previous config is backed up to `config.yaml.bak`.
 

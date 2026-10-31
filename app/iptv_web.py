@@ -653,7 +653,7 @@ class ControlServer:
                 prov = self._read_provider()
                 if not prov.get("enabled"):
                     self._send(400, {"error": "Enter your provider URL/username/password and "
-                                     "press Save & Apply first."})
+                                     "wait a moment for it to save, then try again."})
                     return
                 # Use the on-disk cache only (never the live URL).
                 cats = provider_categories(prov, cache_only=True)
@@ -675,7 +675,7 @@ class ControlServer:
                 prov = self._read_provider()
                 if not prov.get("enabled"):
                     self._send(400, {"error": "Enter your provider URL/username/password and "
-                                     "press Save & Apply first."})
+                                     "wait a moment for it to save, then try again."})
                     return
                 if not query:
                     self._send(200, {"total": 0, "count": 0, "movies": [],
@@ -706,7 +706,7 @@ class ControlServer:
                 prov = self._read_provider()
                 if not prov.get("enabled"):
                     self._send(400, {"error": "Enter your provider URL/username/password and "
-                                     "press Save & Apply first."})
+                                     "wait a moment for it to save, then try again."})
                     return
                 if not query:
                     self._send(200, {"total": 0, "count": 0, "series": [],
@@ -738,7 +738,7 @@ class ControlServer:
                 prov = self._read_provider()
                 if not prov.get("enabled"):
                     self._send(400, {"error": "Enter your provider URL/username/password and "
-                                     "press Save & Apply first."})
+                                     "wait a moment for it to save, then try again."})
                     return
                 # Use the on-disk cache only (never the live URL).
                 chans = cached_provider_channels(prov)
@@ -1391,10 +1391,9 @@ PAGE = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="cfgbar">
-      <button class="save" id="save">Save &amp; Apply</button>
-      <button class="ghost" id="reload">Cancel</button>
-    </div>
+    <div class="pnote" style="text-align:center">Changes are saved automatically.</div>
+    <div id="toast" style="position:fixed;left:50%;bottom:1rem;transform:translateX(-50%);
+         padding:.5rem 1rem;border-radius:20px;font-size:.85rem;display:none;z-index:50"></div>
 
   </section>
 </main>
@@ -1552,7 +1551,7 @@ async function loadForm(){
   // ensure Movies & Series always exist
   moviesPl(); seriesPl();
   renderAdded();
-  // also fill the raw editor
+  SAVED_SNAP=snapNow(); AS_LAST=SAVED_SNAP;
 }
 
 function collectForm(){
@@ -1702,15 +1701,40 @@ async function searchCategories(){
 $('catBtn').onclick=searchCategories;
 $('catSearch').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();searchCategories();}});
 
-// ---- Save / Cancel ----
-$('reload').onclick=loadForm;   // "Cancel" = discard changes, reload saved config
-$('save').onclick=async()=>{
-  const r=await fetch('/api/config-data',{method:'POST',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify(collectForm())});
-  const j=await r.json();
-  if(r.ok) showMsg(true,'Saved. The TV is updating...');
-  else showMsg(false,j.error||'Save failed');
-};
+// ---- Autosave: every change in Settings is saved and applied by itself ----
+let SAVED_SNAP=null, AS_STABLE=0, AS_LAST='', AS_BUSY=false;
+function toast(ok,text){
+  const t=$('toast'); t.textContent=text; t.style.display='block';
+  t.style.background=ok?'var(--okbg)':'var(--errbg)'; t.style.color=ok?'var(--oktx)':'var(--errtx)';
+  clearTimeout(t._h); t._h=setTimeout(()=>t.style.display='none',ok?1800:5000);
+}
+function snapNow(){ try{ return JSON.stringify(collectForm()); }catch(e){ return null; } }
+async function autoSave(){
+  if(AS_BUSY) return;
+  const snap=snapNow(); if(snap===null||snap===SAVED_SNAP) return;
+  AS_BUSY=true;
+  try{
+    const r=await fetch('/api/config-data',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:snap});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){ SAVED_SNAP=snap; toast(true,'Saved'); }
+    else toast(false,j.error||'Save failed');
+  }catch(e){ toast(false,'Could not reach the box'); }
+  AS_BUSY=false;
+}
+setInterval(()=>{
+  if(SAVED_SNAP===null) return;
+  if($('config').offsetParent===null) return;             // Settings tab not shown
+  const a=document.activeElement;
+  if(a && (a.tagName==='TEXTAREA' || (a.tagName==='INPUT' && !['checkbox','file','button'].includes(a.type)))) {
+    return;                                               // still typing: wait for blur
+  }
+  const snap=snapNow();
+  if(snap===null) return;
+  if(snap!==AS_LAST){ AS_LAST=snap; AS_STABLE=0; return; }
+  if(snap!==SAVED_SNAP && ++AS_STABLE>=1) autoSave();
+},1000);
+document.addEventListener('visibilitychange',()=>{ if(document.hidden) autoSave(); });
 
 // ---- remotes management ----
 async function loadRemotes(){

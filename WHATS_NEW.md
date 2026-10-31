@@ -5,9 +5,10 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 26 October 2026
 
 **New**
+- Settings in the web app now **save by themselves**: the Save & Apply and Cancel buttons are gone. A small "Saved" note appears when a change is stored. If you change a setting while watching TV, the picture is not interrupted; the TV applies the change when you leave the stream.
 - **Play on TV** button in the web app's Play tab (above "Open in VLC"): starts the chosen channel, movie or episode on the TV. Movies and episodes continue from where you stopped.
 - The Play tab now shows channel pictures for live categories. Opening a category there also starts the picture scan on the box, as long as nothing is playing on the TV; pictures appear as they are made.
-- **Light theme** for the web app and the TV: Settings > Appearance > Theme (Dark or Light). One setting for both, saved with the other settings (Save & Apply).
+- **Light theme** for the web app and the TV: Settings > Appearance > Theme (Dark or Light). One setting for both, saved with the other settings.
 - The web app's **Play** tab now shows pictures too, in the same order as the TV (Movies, Live, Series): live categories and channels are tiles with your uploaded picture or a colored square.
 - New TV start page: a thin menu on the left (Movies, Live, Series, with the QR code at the bottom) is always shown. The box remembers the last section and starts there (Live the first time).
 - **Live** now shows picture tiles for categories and channels. Upload your own pictures in Settings > Live thumbnails; without one a colored square is used.

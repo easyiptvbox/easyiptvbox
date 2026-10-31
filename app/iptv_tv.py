@@ -2793,7 +2793,12 @@ class App:
                 if not a:
                     break
                 if a == "__reload_config__":
-                    self.reload_config()
+                    # settings autosave: don't interrupt what is being watched
+                    if self.screen_state == SCREEN_PLAYING or \
+                            self.player.is_running():
+                        self._reload_pending = True
+                    else:
+                        self.reload_config()
                 elif a == "__learn_remote__":
                     self.open_learn_remote()
                 elif a == "__remote_stream__":
@@ -2902,6 +2907,15 @@ class App:
                     and time.time() - self._last_saved_pos > 30):
                 self._save_movie_position()
                 self._last_saved_pos = time.time()
+
+            if getattr(self, "_reload_pending", False) and \
+                    self.screen_state not in (SCREEN_PLAYING, SCREEN_LEARN,
+                                              SCREEN_WIFI_LIST,
+                                              SCREEN_WIFI_KEYBOARD,
+                                              SCREEN_WIFI_CONNECT) and \
+                    not self.player.is_running():
+                self._reload_pending = False
+                self.reload_config()
 
             # Watchdog: mpv can hang (process alive but IPC frozen) after a
             # thermal stall - then buttons do nothing. Detect it and recover.

@@ -694,6 +694,14 @@ class App:
 
     LIVE_COLS = 5
 
+    def _resume_scan(self):
+        """Back in a live picture grid after watching: continue the scan.
+        Fresh pictures are skipped, so it picks up where it was stopped."""
+        pl = self.current_playlist
+        if (pl and self.show_thumbs and self._is_live_category()
+                and pl.channels and not self.thumbs.is_scanning()):
+            self._start_thumb_scan(force=False, quiet=True)
+
     def _thumb_cols(self):
         return self.LIVE_COLS
 
@@ -858,6 +866,7 @@ class App:
             self.player.stop()
             self._acquire_display()
             self.screen_state = SCREEN_CHANNELS
+            self._resume_scan()
         elif a in (ir.UP, ir.DOWN):
             step = -1 if a == ir.UP else 1
             order = getattr(self, "_grid_play", None)
@@ -2806,6 +2815,8 @@ class App:
                 self._acquire_display()
                 self.screen_state = (SCREEN_EPISODES if was_series
                                      else SCREEN_CHANNELS)
+                if not was_series:
+                    self._resume_scan()
 
             if self._display_active:
                 # Only redraw when something actually changed (saves CPU on a

@@ -18,6 +18,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - Movies can be streamed to your phone/computer (Safari player, VLC, download).
 
 **Changed**
+- Cleaner TV pages: no selected-title line, no caption under the QR code and no hint text at the bottom; only a small "1/3" page number with an arrow in the bottom right corner when there is more than one page.
 - The TV pages no longer show a "Live/Movies/Series" heading (the left menu already shows it).
 - *Live thumbnails* upload card moved up in Settings (right below Live categories).
 - Remote access no longer uses a PIN; each device's VPN key is the access control.

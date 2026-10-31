@@ -1898,13 +1898,24 @@ class App:
             col = SELECT_TEXT if is_sel else (ACCENT if watched else TEXT)
             t = self._fit(self.f_grid_label, name, col, img_w - 4)
             self.surface.blit(t, (x + 2, y + img_h + 4))
-        if focused:
-            full = self._fit(self.f_item, get(sel)[0], TEXT, avail_w * 0.9)
-            self.surface.blit(full, (left0 + (avail_w - full.get_width()) // 2,
-                                     int(self.H * 0.83)))
         pages = (n + per_page - 1) // per_page
-        self._draw_hint("%s   (page %d/%d)" % (hint, start // per_page + 1,
-                                               pages))
+        if pages > 1:
+            cur = start // per_page + 1
+            t = self.f_hint.render("%d/%d" % (cur, pages), True, DIM)
+            m = int(self.W * 0.03)
+            ty = self.H - t.get_height() - 20
+            tx = self.W - m - t.get_width()
+            self.surface.blit(t, (tx, ty))
+            ah = max(8, t.get_height() // 2)
+            cy = ty + t.get_height() // 2
+            if cur < pages:      # arrow to the right: more pages ahead
+                x0 = tx + t.get_width() + 8
+                pts = [(x0, cy - ah // 2), (x0, cy + ah // 2), (x0 + ah, cy)]
+                pygame.draw.polygon(self.surface, DIM, pts)
+            if cur > 1:          # arrow to the left: pages behind
+                x0 = tx - 8
+                pts = [(x0, cy - ah // 2), (x0, cy + ah // 2), (x0 - ah, cy)]
+                pygame.draw.polygon(self.surface, DIM, pts)
 
     def _draw_resume(self):
         self._draw_header(self.current_channel.name)
@@ -2305,8 +2316,7 @@ class App:
             y += row_h
         # QR code at the bottom of the menu
         qr_px = mw - 4 * pad
-        cap = self.f_hint.render("Scan to control", True, DIM)
-        qy = self.H - cap.get_height() - 24 - qr_px - 16
+        qy = self.H - 24 - qr_px - 6
         surf = self._qr_surface(qr_px)
         if surf is not None:
             qx = (mw - qr_px) // 2
@@ -2315,8 +2325,6 @@ class App:
                              border_radius=8)
             self.surface.blit(pygame.transform.scale(surf, (qr_px, qr_px)),
                               (qx, qy))
-            self.surface.blit(cap, ((mw - cap.get_width()) // 2,
-                                    qy + qr_px + 14))
         self._ox = mw
 
     def _draw_playlists(self):

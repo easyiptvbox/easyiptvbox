@@ -77,8 +77,8 @@ the changes per week (also linked from Settings).
 
 ## Screens
 
-1. **Start page** — a thin menu on the left is always shown: **Live**,
-   **Movies**, **Series** and the QR code (bottom). Up/Down in the menu
+1. **Start page** — a thin menu on the left is always shown: **Movies**,
+   **Live**, **Series** and the QR code (bottom). Up/Down in the menu
    switches the page, OK/Right enters it, Left/Back returns to the menu.
    The last used section is remembered across restarts (first run: Live).
    - **Live**: your categories as picture tiles. Open one to get its

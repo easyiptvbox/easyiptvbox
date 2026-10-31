@@ -21,6 +21,7 @@ import urllib.error
 import urllib.request
 
 from iptv_config import CACHE_DIR, CONFIG_PATH
+import iptv_livepics as _lp
 
 PREFIX_BYTES = 20 * 1024 * 1024
 STREAM_DIR = os.path.join(CACHE_DIR, "stream")
@@ -121,12 +122,15 @@ def _registry():
                     if c.url:
                         it = _item("live", c.name, c.url)
                         items[it["id"]] = it
-                        chans.append({"id": it["id"], "name": it["name"]})
+                        chans.append({"id": it["id"], "name": it["name"],
+                                      "ci": _lp.color_index(it["name"])})
                 live.append({"name": p.display_name,
                              "key": "k" + hashlib.sha1(p.display_name.strip()
                                       .encode("utf-8")).hexdigest()[:12],
+                             "ci": _lp.color_index(p.display_name),
                              "channels": chans})
-        cat = {"live": live, "movies": movies, "series": series}
+        cat = {"live": live, "movies": movies, "series": series,
+               "palette": _lp.PALETTE}
         _reg.update(key=key, items=items, catalog=cat, posters=posters)
         return items, cat
 

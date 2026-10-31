@@ -59,13 +59,13 @@ HELP_PAGE = r"""<!DOCTYPE html>
 <tr><td>VOL + / &minus;</td><td>Volume.</td></tr>
 <tr><td>POWER</td><td>Switches the box off and on (handled by the Argon case).</td></tr>
 </table>
-<p class="tip">While the left menu (Live / Movies / Series) is selected, MENU, BACK or HOME open the menu: Add a remote, Wi-Fi setup,
+<p class="tip">While the left menu (Movies / Live / Series) is selected, MENU, BACK or HOME open the menu: Add a remote, Wi-Fi setup,
 Remote access, Instructions, Standby, Power off.</p>
 </section>
 
 <section id="tv"><h2>Using the TV</h2>
 <h3>Start page</h3>
-<p>A thin menu on the left is always shown: <b>Live</b>, <b>Movies</b> and <b>Series</b>, with the
+<p>A thin menu on the left is always shown: <b>Movies</b>, <b>Live</b> and <b>Series</b>, with the
 QR code at the bottom (it opens this web app on a phone). UP / DOWN in the menu changes the page;
 OK or RIGHT moves into the page, LEFT or BACK moves back to the menu. The box remembers the
 last section and starts there. <b>Live</b> shows your categories as picture tiles; open one to see its

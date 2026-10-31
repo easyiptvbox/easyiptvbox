@@ -996,6 +996,9 @@ PAGE = r"""<!DOCTYPE html>
   .pgrid { display:grid; grid-template-columns:repeat(auto-fill,minmax(104px,1fr)); gap:.6rem; margin-top:.5rem; }
   .ptile { background:var(--panel,#1e2130); border:2px solid transparent; border-radius:10px; padding:0;
            color:var(--text); text-align:left; cursor:pointer; overflow:hidden; font-size:.75rem; }
+  .pgrid.wide { grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); }
+  .pgrid.wide .pimg { aspect-ratio:16/9; padding:0; }
+  .pimg .ptxt { color:#fff; font-size:.8rem; padding:.3rem; }
   .ptile.sel { border-color:var(--accent); }
   .ptile .pimg { width:100%; aspect-ratio:2/3; background:#0c0e14; display:flex; align-items:center;
                  justify-content:center; padding:.3rem; text-align:center; font-size:.72rem; color:var(--dim);
@@ -1083,8 +1086,8 @@ PAGE = r"""<!DOCTYPE html>
       <div class="pnote">Playing here stops the TV, and the TV shows
         "Busy" until you stop.</div>
     </div>
-    <div class="card"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Live TV <span class="hi">?</span></a></h2><div id="plive">Loading&hellip;</div></div>
     <div class="card"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Movies <span class="hi">?</span></a></h2><div id="pmovies"></div></div>
+    <div class="card"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Live TV <span class="hi">?</span></a></h2><div id="plive">Loading&hellip;</div></div>
     <div class="card"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Series <span class="hi">?</span></a></h2><div id="pseries"></div><div id="peps"></div></div>
   </section>
 
@@ -1129,6 +1132,30 @@ PAGE = r"""<!DOCTYPE html>
       <div id="catResults"></div>
       <div style="color:var(--dim);font-size:.8rem;margin:.9rem 0 .3rem">Added categories</div>
       <div id="catAdded"></div>
+    </div>
+
+
+    <div class="card" id="lpCard">
+      <h2>Live thumbnails</h2>
+      <div class="pnote">Choose a live category (or one channel in it) and upload a picture
+        for its tile on the TV. Without a picture a colored square is shown.</div>
+      <label>Category</label>
+      <select id="lpCat"></select>
+      <label>Channel (optional)</label>
+      <input type="text" id="lpFilter" placeholder="Filter channels by name" style="margin-bottom:.3rem">
+      <select id="lpChan"></select>
+      <div style="display:flex;gap:.8rem;align-items:center;margin-top:.7rem">
+        <div id="lpPrev" style="width:160px;height:90px;border-radius:8px;background:#0c0e14;
+             display:flex;align-items:center;justify-content:center;color:var(--dim);
+             font-size:.75rem;overflow:hidden;text-align:center">no picture</div>
+        <div style="flex:1">
+          <input type="file" id="lpFile" accept="image/*">
+        </div>
+      </div>
+      <div style="display:flex;gap:.5rem;margin-top:.6rem">
+        <button class="ghost" id="lpUp" style="flex:1">Upload</button>
+        <button class="ghost" id="lpDel" style="flex:1">Remove picture</button>
+      </div>
     </div>
 
     <div class="card">
@@ -1200,29 +1227,6 @@ PAGE = r"""<!DOCTYPE html>
       <div class="minirow">
         <button class="ghost" id="wifiRetestBtn">Re-test connections</button>
         <button class="ghost" id="wifiSetupBtn">Add / change Wi-Fi (on TV)</button>
-      </div>
-    </div>
-
-    <div class="card" id="lpCard">
-      <h2>Live thumbnails</h2>
-      <div class="pnote">Choose a live category (or one channel in it) and upload a picture
-        for its tile on the TV. Without a picture a colored square is shown.</div>
-      <label>Category</label>
-      <select id="lpCat"></select>
-      <label>Channel (optional)</label>
-      <input type="text" id="lpFilter" placeholder="Filter channels by name" style="margin-bottom:.3rem">
-      <select id="lpChan"></select>
-      <div style="display:flex;gap:.8rem;align-items:center;margin-top:.7rem">
-        <div id="lpPrev" style="width:160px;height:90px;border-radius:8px;background:#0c0e14;
-             display:flex;align-items:center;justify-content:center;color:var(--dim);
-             font-size:.75rem;overflow:hidden;text-align:center">no picture</div>
-        <div style="flex:1">
-          <input type="file" id="lpFile" accept="image/*">
-        </div>
-      </div>
-      <div style="display:flex;gap:.5rem;margin-top:.6rem">
-        <button class="ghost" id="lpUp" style="flex:1">Upload</button>
-        <button class="ghost" id="lpDel" style="flex:1">Remove picture</button>
       </div>
     </div>
 
@@ -1851,22 +1855,24 @@ function pSelect(label,options,onpick){
   wrap.appendChild(sel);
   return wrap;
 }
-function posterGrid(items,onpick){
+function posterGrid(items,onpick,wide){
   const wrap=document.createElement('div');
   let box=null;
   if(items.length>8){
     box=document.createElement('input'); box.type='text'; box.placeholder='Filter by name';
     box.style.marginBottom='.2rem'; wrap.appendChild(box);
   }
-  const grid=document.createElement('div'); grid.className='pgrid'; wrap.appendChild(grid);
+  const grid=document.createElement('div'); grid.className='pgrid'+(wide?' wide':''); wrap.appendChild(grid);
   const tiles=items.map(it=>{
     const b=document.createElement('button'); b.className='ptile'; b.type='button';
     const im=document.createElement('div'); im.className='pimg';
-    if(it.poster){
-      const i=document.createElement('img'); i.loading='lazy'; i.alt=''; i.src='/api/poster/'+it.poster+'.jpg';
-      i.onerror=()=>{ i.remove(); im.textContent=it.name; };
+    const fallback=()=>{ im.textContent=''; if(it.color) im.style.background='rgb('+it.color.join(',')+')';
+      const sp=document.createElement('span'); sp.className='ptxt'; sp.textContent=it.name; if(!it.color) sp.style.color='var(--dim)'; im.appendChild(sp); };
+    if(it.src){
+      const i=document.createElement('img'); i.loading='lazy'; i.alt=''; i.src=it.src;
+      i.onerror=()=>{ i.remove(); fallback(); };
       im.appendChild(i);
-    }else im.textContent=it.name;
+    }else fallback();
     const nm=document.createElement('div'); nm.className='pname'; nm.textContent=it.name;
     b.appendChild(im); b.appendChild(nm);
     b.onclick=()=>{ tiles.forEach(t=>t.el.classList.remove('sel')); b.classList.add('sel'); onpick(it); };
@@ -1882,21 +1888,35 @@ async function loadPlay(){
   try{ const r=await fetch('/api/play/catalog'); d=await r.json(); }
   catch(e){ $('plive').textContent='Could not load the lists.'; return; }
   PSELS=[];
-  const live=$('plive'); live.innerHTML='';
-  (d.live||[]).forEach(cat=>{
-    live.appendChild(pSelect(cat.name+' ('+cat.channels.length+')',
-      cat.channels.map(c=>({value:c.id,text:c.name})),
-      id=>{ const c=cat.channels.find(x=>x.id===id); playItem('live',id,c.name,'ts'); }));
-  });
-  if(!(d.live||[]).length) live.textContent='No live categories added under Settings.';
+  const live=$('plive');
+  let have=new Set();
+  try{ have=new Set((await (await fetch('/api/livepic/list')).json()).keys||[]); }catch(e){}
+  const pal=d.palette||[[60,60,60]];
+  const col=ci=>pal[ci%pal.length];
+  const showCats=()=>{
+    live.innerHTML='';
+    if(!(d.live||[]).length){ live.textContent='No live categories added under Settings.'; return; }
+    live.appendChild(posterGrid((d.live||[]).map(c=>({key:c.key,name:c.name,color:col(c.ci),
+      src:have.has(c.key)?'/api/livepic/'+c.key+'.jpg':'',c:c})),it=>showChans(it.c),true));
+  };
+  const showChans=cat=>{
+    live.innerHTML='';
+    const b=document.createElement('button'); b.className='ghost'; b.type='button';
+    b.textContent='\u2190 '+cat.name+' ('+cat.channels.length+')'; b.style.cssText='width:100%;margin-bottom:.3rem';
+    b.onclick=showCats; live.appendChild(b);
+    live.appendChild(posterGrid(cat.channels.map(c=>({key:c.id,name:c.name,color:col(c.ci),
+      src:have.has('c'+c.id)?'/api/livepic/c'+c.id+'.jpg':'',c:c})),
+      it=>playItem('live',it.c.id,it.c.name,'ts'),true));
+  };
+  showCats();
   const mv=$('pmovies'); mv.innerHTML='';
   if((d.movies||[]).length)
-    mv.appendChild(posterGrid(d.movies.map(m=>({key:m.id,name:m.name,poster:m.poster,m:m})),
+    mv.appendChild(posterGrid(d.movies.map(m=>({key:m.id,name:m.name,src:m.poster?'/api/poster/'+m.poster+'.jpg':'',m:m})),
       it=>playItem('movie',it.m.id,it.m.name,it.m.ext)));
   else mv.textContent='No movies added under Settings.';
   const se=$('pseries'); se.innerHTML=''; $('peps').innerHTML='';
   if((d.series||[]).length){
-    se.appendChild(posterGrid(d.series.map(s=>({key:s.sid,name:s.name,poster:s.poster,s:s})),
+    se.appendChild(posterGrid(d.series.map(s=>({key:s.sid,name:s.name,src:s.poster?'/api/poster/'+s.poster+'.jpg':'',s:s})),
       it=>loadEpisodes(it.s.sid)));
   } else se.textContent='No series added under Settings.';
 }

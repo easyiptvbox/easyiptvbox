@@ -41,8 +41,12 @@ def chan_key(url):
     return "c" + _h(str(url))[:12]
 
 
+def color_index(name):
+    return int(_h(str(name).casefold())[:6], 16) % len(PALETTE)
+
+
 def color_for(name):
-    return PALETTE[int(_h(str(name).casefold())[:6], 16) % len(PALETTE)]
+    return PALETTE[color_index(name)]
 
 
 def path_for(key):

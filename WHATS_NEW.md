@@ -5,7 +5,8 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 26 October 2026
 
 **New**
-- New TV start page: a thin menu on the left (Live, Movies, Series, with the QR code at the bottom) is always shown. The box remembers the last section and starts there (Live the first time).
+- The web app's **Play** tab now shows pictures too, in the same order as the TV (Movies, Live, Series): live categories and channels are tiles with your uploaded picture or a colored square.
+- New TV start page: a thin menu on the left (Movies, Live, Series, with the QR code at the bottom) is always shown. The box remembers the last section and starts there (Live the first time).
 - **Live** now shows picture tiles for categories and channels. Upload your own pictures in Settings > Live thumbnails; without one a colored square is used.
 - Movies and Series now show **posters** instead of text lists, on the TV (poster grid) and in the web app's Play tab (with a filter box). Posters come from your provider and are cached on the box; items without a picture show their title.
 - Software updates: the box now updates itself from GitHub (optional weekly check), with an **Update now** button and a version display in Settings.
@@ -17,6 +18,8 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - Movies can be streamed to your phone/computer (Safari player, VLC, download).
 
 **Changed**
+- The TV pages no longer show a "Live/Movies/Series" heading (the left menu already shows it).
+- *Live thumbnails* upload card moved up in Settings (right below Live categories).
 - Remote access no longer uses a PIN; each device's VPN key is the access control.
 - The web app now detects the box's own IP address instead of assuming a fixed one.
 - README points to the QR code on the TV start page for opening the web app.

@@ -35,7 +35,7 @@ import iptv_net
 import iptv_stream
 
 MENU_SCREENS = ("playlists", "channels", "series")   # screens with the left menu
-SECTIONS = ("live", "movies", "series")
+SECTIONS = ("movies", "live", "series")
 SECTION_LABELS = {"live": "Live", "movies": "Movies", "series": "Series"}
 UI_STATE_PATH = os.path.join(
     os.environ.get("IPTV_CACHE", os.path.join(os.path.dirname(
@@ -1694,7 +1694,7 @@ class App:
         elif self.screen_state == SCREEN_SERIES:
             ser = self.current_playlist.series
             self._draw_poster_grid(
-                self.current_playlist.name, len(ser),
+                "", len(ser),
                 lambda k: (ser[k]["name"], ser[k].get("logo", ""), False),
                 self.series_index, "OK to open  -  Left for menu",
                 empty="No series added yet.", focused=not self.menu_focus)
@@ -1840,8 +1840,10 @@ class App:
         """Grid of tiles. get(i) -> (name, picture, watched); picture is a
         provider URL, a local file path or ''. Colored/dark text tile when
         there is no picture."""
-        self._draw_header(title + (("   " + subtitle) if subtitle else ""),
-                          font=self.f_grid_header)
+        head = (title + (("   " + subtitle) if title and subtitle else subtitle)
+                ).strip()
+        if head:
+            self._draw_header(head, font=self.f_grid_header)
         left0 = self._ox
         avail_w = self.W - left0
         if n == 0:
@@ -1850,7 +1852,7 @@ class App:
                                     int(self.H * 0.4)))
             self._draw_hint(hint)
             return
-        top = int(self.H * 0.16)
+        top = int(self.H * (0.16 if head else 0.06))
         gap = int(self.W * 0.014)
         vgap = int(self.H * 0.025)
         area_w = int(avail_w * 0.94)
@@ -2327,7 +2329,7 @@ class App:
             pic = iptv_livepics.find(iptv_livepics.cat_key(pl.display_name))
             return (pl.display_name, pic or "", False)
         self._draw_poster_grid(
-            "Live", len(cats), get, self.live_sel,
+            "", len(cats), get, self.live_sel,
             "OK to open  -  Left for menu", cols=self.LIVE_COLS, rows=3,
             aspect=16 / 9, colored=True, cover=True,
             focused=not self.menu_focus,
@@ -2399,7 +2401,7 @@ class App:
         chans = self.current_playlist.channels
         if self.current_playlist.is_movies:
             self._draw_poster_grid(
-                self.current_playlist.display_name, len(chans),
+                "", len(chans),
                 lambda k: (chans[k].name, chans[k].logo,
                            self.movies.is_watched(chans[k].url)),
                 self.ch_index, "OK to watch  -  Left for menu",

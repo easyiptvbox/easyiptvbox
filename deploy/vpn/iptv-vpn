@@ -243,6 +243,8 @@ SB_CONF_DIR = "/etc/iptv-proxy"
 SB_CONF = os.path.join(SB_CONF_DIR, "config.json")
 SB_USER = "iptvproxy"
 SB_UNIT = "/etc/systemd/system/iptv-proxy.service"
+PROXY_BOX_IP = "192.0.2.1"   # box address inside TCP mode: not a private (LAN) address,
+                            # so apps with "bypass LAN" still send it into the tunnel
 TUNNEL_PORT = 8081          # loopback port of the web app for tunnel traffic
 DEFAULT_PROXY_PORT = 8443
 DEFAULT_SNI = "www.microsoft.com"
@@ -314,7 +316,8 @@ def sb_config(px):
         "route": {"rules": [
             # the only thing a client can reach: the box's web app, which is
             # redirected to its own loopback port (treated as remote access)
-            {"inbound": ["in"], "ip_cidr": [SERVER_IP + "/32"], "port": [8080],
+            {"inbound": ["in"], "ip_cidr": [SERVER_IP + "/32", PROXY_BOX_IP + "/32"],
+             "port": [8080],
              "action": "route-options", "override_address": "127.0.0.1",
              "override_port": TUNNEL_PORT},
             {"inbound": ["in"], "ip_cidr": ["127.0.0.1/32"],
@@ -455,7 +458,7 @@ def proxy_profile(px, u, host):
         "inbounds": [{"type": "tun", "tag": "tun",
                       "address": ["172.19.0.1/30"], "auto_route": True,
                       "strict_route": False,
-                      "route_address": [SERVER_IP + "/32"]}],
+                      "route_address": [PROXY_BOX_IP + "/32"]}],
         "outbounds": [
             {"type": "vless", "tag": "box", "server": host,
              "server_port": int(px["port"]), "uuid": u["uuid"],
@@ -466,7 +469,7 @@ def proxy_profile(px, u, host):
                                  "short_id": px["short_id"]}}},
             {"type": "direct", "tag": "direct"}],
         "route": {"auto_detect_interface": True, "final": "direct",
-                  "rules": [{"ip_cidr": [SERVER_IP + "/32"],
+                  "rules": [{"ip_cidr": [PROXY_BOX_IP + "/32"],
                              "action": "route", "outbound": "box"}]},
     }
 
@@ -507,7 +510,7 @@ def cmd_proxy_status(st):
         "enabled": bool(px.get("enabled")), "running": proxy_running(),
         "port": int(px.get("port", DEFAULT_PROXY_PORT)),
         "installed": os.path.exists(SB_BIN), "sni": px.get("sni", DEFAULT_SNI),
-        "host": proxy_host(st),
+        "host": proxy_host(st), "box_ip": PROXY_BOX_IP,
         "users": [{"name": u["name"]} for u in px.get("users", [])]}))
 
 

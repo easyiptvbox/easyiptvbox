@@ -90,6 +90,7 @@ class ControlServer:
         self.httpd = None
         # a snapshot the UI can show (set by the app)
         self.status = {"screen": "", "playlist": "", "channel": ""}
+        self.tunnel_last = 0.0       # last request that came through the TCP tunnel
         self.pending_tv = None       # {"kind","url","name","sid"} for "Play on TV"
         self.pending_scan = []       # stream URLs to scan for pictures
 
@@ -138,6 +139,8 @@ class ControlServer:
                 pass  # keep the journal quiet
 
             def _is_remote(self):
+                if getattr(self.server, "is_tunnel", False):
+                    outer.tunnel_last = time.time()
                 """True for WireGuard clients and for the TCP-mode tunnel
                 (its own loopback port)."""
                 import iptv_remote
@@ -371,6 +374,8 @@ class ControlServer:
                     import iptv_remote
                     st = iptv_remote.status()
                     st["via_vpn"] = self._is_remote()
+                    st["tunnel_last"] = outer.tunnel_last if not \
+                        getattr(self.server, "is_tunnel", False) else 0
                     self._send(200, st)
                     return
                 if path == "/api/update/status":
@@ -1590,7 +1595,7 @@ PAGE = r"""<!DOCTYPE html>
             internet is untouched).</div>
           <a class="pbtn alt" id="tcpProfDl" href="#" download="easyiptvbox.json">Download the sing-box profile</a>
           <a class="pbtn alt" id="tcpCopy" href="#">Copy the link</a>
-          <div class="pnote">After connecting, open <b>http://10.66.0.1:8080</b> in the phone's browser.</div>
+          <div class="pnote">After connecting, open <b>http://192.0.2.1:8080</b> in the phone's browser (this address only exists inside TCP mode).</div>
         </div>
       </details>
 
@@ -2218,7 +2223,8 @@ $('updBtn').onclick=async()=>{
 async function loadTcp(px){
   const box=$('tcpBox'); if(!box) return;
   if(!px){ $('tcpStatus').textContent='TCP mode is not available on this box (update needed).'; return; }
-  $('tcpStatus').textContent=(px.enabled?(px.running?'TCP mode is ON':'TCP mode is enabled but not running'):'TCP mode is OFF')+' (TCP '+px.port+').'+(px.enabled&&!px.running?' Check the box log: journalctl -u iptv-proxy.':'');
+  const ago2=t=>{ if(!t) return 'never'; const s=Math.round(Date.now()/1000-t); return s<90?s+' s ago':Math.round(s/60)+' min ago'; };
+  $('tcpStatus').textContent=(px.enabled?(px.running?'TCP mode is ON':'TCP mode is enabled but not running'):'TCP mode is OFF')+' (TCP '+px.port+').'+(px.enabled&&!px.running?' Check the box log: journalctl -u iptv-proxy.':'')+(px.enabled?' Last page request through the tunnel: '+ago2(window.__tunnelLast)+'.':'');
   if(document.activeElement!==$('tcpPort')) $('tcpPort').value=px.port;
   document.querySelectorAll('.tcpPortTxt').forEach(e=>e.textContent=px.port);
   $('tcpToggle').textContent=px.enabled?'Turn TCP mode off':'Turn TCP mode on';
@@ -2265,6 +2271,7 @@ async function loadRemote(){
     +(dd.last_error?(' \u2013 '+dd.last_error):'')+'.'):' DuckDNS not set.';
   if(st.via_vpn) t+=' (You are connected over the VPN \u2013 change these settings from home.)';
   $('raStatus').textContent=t;
+  window.__tunnelLast=st.tunnel_last||0;
   loadTcp(st.proxy);
   $('raToggle').textContent=st.enabled?'Turn remote access off':'Turn remote access on';
   $('raToggle').onclick=async()=>{ await postJ('/api/remote/enable',{on:!st.enabled}); loadRemote(); };

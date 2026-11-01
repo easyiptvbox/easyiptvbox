@@ -149,10 +149,10 @@ connection (VLESS + Reality) instead. It can be on at the same time as WireGuard
  <li>Turn <b>TCP mode</b> on (the first time the box downloads a small program).</li>
  <li><b>Add device</b>: a QR code, a link and a profile file are shown once. Send it only to that person: it is their secret.</li>
  <li>On the phone install the free <b>sing-box</b> app (Android: SFA, iPhone: SFI) or Hiddify, import the profile file
-  (or the link), and connect. Then open <b>http://10.66.0.1:8080</b> in the browser.</li>
+  (or the link), and connect. Then open <b>http://192.0.2.1:8080</b> in the browser (inside TCP mode the box has this address).</li>
 </ol>
 <p>Some apps (Hiddify) show a red "Timeout" in their connection test even when it works, because the test visits a public
-website and the box only allows its own web app. Judge by whether <b>http://10.66.0.1:8080</b> opens.</p>
+website and the box only allows its own web app. Judge by whether <b>http://192.0.2.1:8080</b> opens. In the app, turn <b>off</b> options such as "bypass LAN" if it still does not open.</p>
 <p>Like WireGuard it only reaches this box, never the rest of your network. If the box's address changes, send a new
 profile. Whether it works from inside a country that blocks traffic can change over time and cannot be guaranteed.</p>
 </section>

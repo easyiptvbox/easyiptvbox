@@ -38,6 +38,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - README points to the QR code on the TV start page for opening the web app.
 
 **Fixed**
+- TCP mode: the box is now reached at **http://192.0.2.1:8080** instead of 10.66.0.1. Apps like Hiddify keep private addresses (10.x) outside the tunnel ("bypass LAN"), so the page never opened. The tunnel status in Settings now also shows when the last page request came through. Updating restarts the service.
 - TCP mode: apps that multiplex their connections (Hiddify) connected but got no data, because the box did not accept multiplexing. It does now; updating restarts the service with the new setting.
 - TCP mode: the service crashed at start on the Pi (its security settings blocked a socket type sing-box needs), so connections timed out. Fixed; updating also repairs an already-enabled TCP mode automatically.
 - The TV guide is shared by all profiles: the automatic guide is now built from the channels of every profile, so switching to an empty profile no longer leaves it without guide data.

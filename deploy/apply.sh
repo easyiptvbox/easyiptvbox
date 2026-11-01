@@ -41,6 +41,11 @@ inst 0644 "$REPO/deploy/splash/plymouth-quit-retain.conf" \
     /etc/systemd/system/plymouth-quit.service.d/retain.conf
 inst 0755 "$REPO/deploy/vpn/iptv-vpn" /usr/local/sbin/iptv-vpn
 
+# --- TCP remote access: refresh its service file after an update (if enabled)
+if [ -e /etc/systemd/system/iptv-proxy.service ]; then
+    /usr/local/sbin/iptv-vpn proxy-refresh >/dev/null 2>&1 || true
+fi
+
 # --- IR keymap: only seed (the app rewrites it when remotes are learned) ---
 [ -e /etc/rc_keymaps/argon.toml ] || install -D -m 0644 "$REPO/deploy/argon.toml" /etc/rc_keymaps/argon.toml
 

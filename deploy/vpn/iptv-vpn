@@ -353,12 +353,9 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-PrivateDevices=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
-CapabilityBoundingSet=
-AmbientCapabilities=
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target
@@ -407,6 +404,24 @@ def cmd_proxy_enable(st, args):
     subprocess.run(["systemctl", "enable", "--now", "iptv-duckdns.timer"],
                    capture_output=True)
     cmd_duckdns_update(st)
+
+
+def cmd_proxy_refresh(st):
+    """After an update: rewrite the service file / config if they changed and
+    restart the service (no-op when TCP mode was never enabled)."""
+    px = proxy_state(st)
+    if not px.get("enabled") or not os.path.exists(SB_BIN):
+        return
+    try:
+        old = open(SB_UNIT).read()
+    except OSError:
+        old = ""
+    if old != SB_UNIT_TEXT:
+        with open(SB_UNIT, "w") as f:
+            f.write(SB_UNIT_TEXT)
+    sb_keys(px)
+    save(st)
+    proxy_apply(st, restart=(old != SB_UNIT_TEXT or not proxy_running()))
 
 
 def cmd_proxy_disable(st):
@@ -539,6 +554,8 @@ def main():
         cmd_duckdns_update(st)
     elif cmd == "proxy-enable":
         cmd_proxy_enable(st, args)
+    elif cmd == "proxy-refresh":
+        cmd_proxy_refresh(st)
     elif cmd == "proxy-disable":
         cmd_proxy_disable(st)
     elif cmd == "proxy-add":

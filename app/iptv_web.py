@@ -1567,6 +1567,8 @@ PAGE = r"""<!DOCTYPE html>
           device again if you lose it. The same code is also shown on the TV.</div>
         <a class="pbtn alt" id="raConfDl" href="#" download="easyiptvbox.conf">Download the
           config file instead</a>
+        <a class="pbtn alt" id="raConfShare" href="#">Share / open in the WireGuard app</a>
+        <a class="pbtn alt" id="raConfCopy" href="#">Copy the config text</a>
       </div>
 
       <details id="tcpBox" style="margin-top:1rem"><summary>TCP mode &ndash; for countries that block WireGuard</summary>
@@ -1594,6 +1596,8 @@ PAGE = r"""<!DOCTYPE html>
             import in the sing-box app (only the box goes through the tunnel, the rest of the phone's
             internet is untouched).</div>
           <a class="pbtn alt" id="tcpProfDl" href="#" download="easyiptvbox.json">Download the sing-box profile</a>
+          <a class="pbtn alt" id="tcpProfShare" href="#">Share / open in the sing-box app</a>
+          <a class="pbtn alt" id="tcpProfCopy" href="#">Copy the profile text</a>
           <a class="pbtn alt" id="tcpCopy" href="#">Copy the link</a>
           <div class="pnote">After connecting, open <b>http://192.0.2.1:8080</b> in the phone's browser (this address only exists inside TCP mode).</div>
         </div>
@@ -2251,8 +2255,7 @@ $('tcpAdd').onclick=async()=>{
     const j=await postJ('/api/remote/proxy-add',{name:name,host:$('tcpHost').value.trim()});
     $('tcpQrImg').innerHTML=j.qr;
     const svg=$('tcpQrImg').querySelector('svg'); if(svg){svg.style.width='100%';svg.style.height='auto';}
-    $('tcpProfDl').href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(j.profile,null,1));
-    $('tcpProfDl').download=name.replace(/[^A-Za-z0-9_-]+/g,'_')+'.json';
+    wireFile('tcpProf',JSON.stringify(j.profile,null,1),name.replace(/[^A-Za-z0-9_-]+/g,'_')+'.json','application/json');
     $('tcpCopy').onclick=async(e)=>{ e.preventDefault(); try{ await navigator.clipboard.writeText(j.link); $('tcpCopy').textContent='Copied'; }catch(err){ prompt('Copy this link',j.link); } };
     $('tcpOut').style.display=''; $('tcpNewName').value='';
   }catch(e){}
@@ -2291,6 +2294,26 @@ async function loadRemote(){
   });
   if(!(st.peers||[]).length) box.innerHTML='<div class="pnote" style="margin:0">No devices yet.</div>';
 }
+// Phones often refuse data: downloads, so files are made as blobs, with Share and Copy as fallbacks.
+function wireFile(prefix,text,fname,mime){
+  const blob=new Blob([text],{type:mime});
+  const dl=$(prefix+'Dl');
+  if(dl._u) URL.revokeObjectURL(dl._u);
+  dl._u=URL.createObjectURL(blob); dl.href=dl._u; dl.download=fname;
+  const sh=$(prefix+'Share');
+  sh.onclick=async(e)=>{ e.preventDefault();
+    try{
+      const f=new File([text],fname,{type:mime});
+      if(navigator.canShare && navigator.canShare({files:[f]})){ await navigator.share({files:[f],title:fname}); return; }
+    }catch(err){ if(err&&err.name==='AbortError') return; }
+    try{ await navigator.share({title:fname,text:text}); }
+    catch(err){ if(!err||err.name!=='AbortError') alert('Sharing is not available here. Use "Copy" and paste it into the app.'); }
+  };
+  const cp=$(prefix+'CopyProf')||$(prefix+'Copy');
+  cp.onclick=async(e)=>{ e.preventDefault(); const t=cp.textContent;
+    try{ await navigator.clipboard.writeText(text); cp.textContent='Copied'; setTimeout(()=>cp.textContent=t,2500); }
+    catch(err){ prompt('Copy this text',text); } };
+}
 async function postJ(url,body){
   const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
   let j={}; try{ j=await r.json(); }catch(e){}
@@ -2309,8 +2332,7 @@ $('raAdd').onclick=async()=>{
     const j=await postJ('/api/remote/add',{name});
     $('raQrImg').innerHTML=j.qr;
     const svg=$('raQrImg').querySelector('svg'); if(svg){svg.style.width='100%';svg.style.height='auto';}
-    $('raConfDl').href='data:text/plain;charset=utf-8,'+encodeURIComponent(j.conf);
-    $('raConfDl').download=name.replace(/[^A-Za-z0-9_-]+/g,'_')+'.conf';
+    wireFile('raConf',j.conf,name.replace(/[^A-Za-z0-9_-]+/g,'_')+'.conf','text/plain');
     $('raQr').style.display=''; $('raNewName').value='';
   }catch(e){}
   loadRemote();

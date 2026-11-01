@@ -36,6 +36,10 @@ def status():
     except Exception as e:
         return {"installed": os.path.exists(HELPER), "error": str(e)}
     st["installed"] = True
+    try:
+        st["proxy"] = json.loads(_helper("proxy-status", timeout=15))
+    except Exception:
+        st["proxy"] = None
     st["lan_ip"] = _lan_ip()
     try:
         st["lan_mac"] = open("/sys/class/net/eth0/address").read().strip()
@@ -52,6 +56,22 @@ def _lan_ip():
         return f[f.index("src") + 1]
     except Exception:
         return ""
+
+
+def proxy_enable(on, port=None):
+    if on:
+        args = ["proxy-enable"] + ([str(int(port))] if port else [])
+        _helper(*args, timeout=240)         # downloads sing-box the first time
+    else:
+        _helper("proxy-disable")
+
+
+def proxy_add(name, host=""):
+    return json.loads(_helper("proxy-add", name, *([host] if host else [])))
+
+
+def proxy_remove(name):
+    _helper("proxy-remove", name)
 
 
 def enable(on):

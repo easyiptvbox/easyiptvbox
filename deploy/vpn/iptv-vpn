@@ -12,11 +12,28 @@ home network), plus a DuckDNS updater.
     iptv-vpn set-duckdns <domain>  token is read from stdin
     iptv-vpn duckdns-update        update the DuckDNS record now
 
+TCP mode for networks that block WireGuard/UDP (VLESS + Reality via sing-box,
+looks like ordinary HTTPS; clients can only reach this box's web app):
+
+    iptv-vpn proxy-enable [port]   install sing-box (pinned + checksum) and start it
+    iptv-vpn proxy-disable
+    iptv-vpn proxy-add <name> [host]   new device; prints JSON (link + profile)
+    iptv-vpn proxy-remove <name>
+    iptv-vpn proxy-status          JSON status
+
 State lives in /etc/iptv-vpn (root only).
 """
+import hashlib
 import ipaddress
 import json
 import os
+import pwd
+import platform
+import shutil
+import tarfile
+import tempfile
+import urllib.parse
+import uuid
 import re
 import subprocess
 import sys
@@ -210,6 +227,269 @@ def cmd_duckdns_update(st):
     save(st)
 
 
+# ---------------------------------------------------------------------------
+#  TCP mode: VLESS + Reality (sing-box)
+# ---------------------------------------------------------------------------
+SB_VERSION = "1.14.4"
+SB_SHA256 = {       # official release assets (checked before use)
+    "aarch64": ("sing-box-%s-linux-arm64-glibc.tar.gz" % SB_VERSION,
+                "241cb4ccbf1a003235f8a969cc25d28cc74487df52721f6de28be7e37eae2ae9"),
+    "x86_64": ("sing-box-%s-linux-amd64-glibc.tar.gz" % SB_VERSION,
+               "231e57c18378f780a08de832844a1ca9716e17a7bcf82964b350844d243c03ac"),
+}
+SB_DIR = "/usr/local/lib/iptv-proxy"
+SB_BIN = os.path.join(SB_DIR, "sing-box")
+SB_CONF_DIR = "/etc/iptv-proxy"
+SB_CONF = os.path.join(SB_CONF_DIR, "config.json")
+SB_USER = "iptvproxy"
+SB_UNIT = "/etc/systemd/system/iptv-proxy.service"
+TUNNEL_PORT = 8081          # loopback port of the web app for tunnel traffic
+DEFAULT_PROXY_PORT = 8443
+DEFAULT_SNI = "www.microsoft.com"
+
+
+def sb_install():
+    if os.path.exists(SB_BIN):
+        return
+    name, want = SB_SHA256.get(platform.machine(), (None, None))
+    if not name:
+        raise SystemExit("unsupported CPU: %s" % platform.machine())
+    url = "https://github.com/SagerNet/sing-box/releases/download/v%s/%s" % (
+        SB_VERSION, name)
+    tmp = tempfile.mkdtemp()
+    try:
+        arc = os.path.join(tmp, name)
+        with urllib.request.urlopen(url, timeout=120) as r, open(arc, "wb") as f:
+            shutil.copyfileobj(r, f)
+        with open(arc, "rb") as f:
+            got = hashlib.sha256(f.read()).hexdigest()
+        if got != want:
+            raise SystemExit("sing-box download failed the checksum, not installed")
+        with tarfile.open(arc) as t:
+            member = next(m for m in t.getmembers()
+                          if m.isfile() and m.name.endswith("/sing-box"))
+            member.name = "sing-box"
+            t.extract(member, tmp)
+        os.makedirs(SB_DIR, mode=0o755, exist_ok=True)
+        shutil.copy(os.path.join(tmp, "sing-box"), SB_BIN + ".new")
+        os.chmod(SB_BIN + ".new", 0o755)
+        os.replace(SB_BIN + ".new", SB_BIN)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def proxy_state(st):
+    return st.setdefault("proxy", {"enabled": False, "users": []})
+
+
+def sb_keys(px):
+    if not px.get("priv"):
+        out = sh(SB_BIN, "generate", "reality-keypair")
+        kv = dict(l.split(": ", 1) for l in out.splitlines() if ": " in l)
+        px["priv"], px["pub"] = kv["PrivateKey"].strip(), kv["PublicKey"].strip()
+    if not px.get("short_id"):
+        px["short_id"] = sh(SB_BIN, "generate", "rand", "4", "--hex")
+    px.setdefault("port", DEFAULT_PROXY_PORT)
+    px.setdefault("sni", DEFAULT_SNI)
+
+
+def sb_config(px):
+    """Server config: VLESS+Reality in, only the box's web app out."""
+    return {
+        "log": {"level": "warn"},
+        "inbounds": [{
+            "type": "vless", "tag": "in", "listen": "::",
+            "listen_port": int(px["port"]),
+            "users": [{"name": u["name"], "uuid": u["uuid"],
+                       "flow": "xtls-rprx-vision"} for u in px["users"]],
+            "tls": {"enabled": True, "server_name": px["sni"],
+                    "reality": {"enabled": True,
+                                "handshake": {"server": px["sni"],
+                                              "server_port": 443},
+                                "private_key": px["priv"],
+                                "short_id": [px["short_id"]]}}}],
+        "outbounds": [{"type": "direct", "tag": "box"}],
+        "route": {"rules": [
+            # the only thing a client can reach: the box's web app, which is
+            # redirected to its own loopback port (treated as remote access)
+            {"inbound": ["in"], "ip_cidr": [SERVER_IP + "/32"], "port": [8080],
+             "action": "route-options", "override_address": "127.0.0.1",
+             "override_port": TUNNEL_PORT},
+            {"inbound": ["in"], "ip_cidr": ["127.0.0.1/32"],
+             "port": [TUNNEL_PORT], "action": "route", "outbound": "box"},
+            {"inbound": ["in"], "action": "reject"}]},
+    }
+
+
+def sb_write(px):
+    os.makedirs(SB_CONF_DIR, mode=0o750, exist_ok=True)
+    try:
+        gid = pwd.getpwnam(SB_USER).pw_gid
+    except KeyError:
+        gid = 0
+    tmp = SB_CONF + ".new"
+    with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o640),
+              "w") as f:
+        json.dump(sb_config(px), f, indent=1)
+    os.chown(tmp, 0, gid)
+    os.chown(SB_CONF_DIR, 0, gid)
+    subprocess.run([SB_BIN, "check", "-c", tmp], check=True,
+                   capture_output=True)
+    os.replace(tmp, SB_CONF)
+
+
+SB_UNIT_TEXT = """[Unit]
+Description=EasyIPTVBox TCP remote access (sing-box, VLESS+Reality)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=%s
+ExecStart=%s run -c %s
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
+""" % (SB_USER, SB_BIN, SB_CONF)
+
+
+def proxy_running():
+    return subprocess.run(["systemctl", "is-active", "--quiet",
+                           "iptv-proxy.service"]).returncode == 0
+
+
+def proxy_apply(st, restart=False):
+    px = proxy_state(st)
+    sb_write(px)
+    if px.get("enabled"):
+        subprocess.run(["systemctl", "daemon-reload"], capture_output=True)
+        subprocess.run(["systemctl", "enable", "iptv-proxy.service"],
+                       capture_output=True)
+        if proxy_running() and not restart:
+            subprocess.run(["systemctl", "reload", "iptv-proxy.service"],
+                           capture_output=True)
+        else:
+            subprocess.run(["systemctl", "restart", "iptv-proxy.service"],
+                           check=True, capture_output=True)
+
+
+def cmd_proxy_enable(st, args):
+    px = proxy_state(st)
+    if args:
+        port = int(args[0])
+        if not 1024 <= port <= 65535 or port in (8080, TUNNEL_PORT, PORT):
+            raise SystemExit("choose a TCP port between 1024 and 65535")
+        px["port"] = port
+    sb_install()
+    try:
+        pwd.getpwnam(SB_USER)
+    except KeyError:
+        subprocess.run(["useradd", "--system", "--no-create-home",
+                        "--shell", "/usr/sbin/nologin", SB_USER], check=True)
+    sb_keys(px)
+    with open(SB_UNIT, "w") as f:
+        f.write(SB_UNIT_TEXT)
+    px["enabled"] = True
+    save(st)
+    proxy_apply(st, restart=True)
+    subprocess.run(["systemctl", "enable", "--now", "iptv-duckdns.timer"],
+                   capture_output=True)
+    cmd_duckdns_update(st)
+
+
+def cmd_proxy_disable(st):
+    px = proxy_state(st)
+    px["enabled"] = False
+    save(st)
+    subprocess.run(["systemctl", "disable", "--now", "iptv-proxy.service"],
+                   capture_output=True)
+
+
+def proxy_link(px, u, host):
+    q = urllib.parse.urlencode({
+        "encryption": "none", "flow": "xtls-rprx-vision", "security": "reality",
+        "sni": px["sni"], "fp": "chrome", "pbk": px["pub"],
+        "sid": px["short_id"], "type": "tcp"})
+    return "vless://%s@%s:%d?%s#%s" % (u["uuid"], host, int(px["port"]), q,
+                                      urllib.parse.quote("EasyIPTVBox " + u["name"]))
+
+
+def proxy_profile(px, u, host):
+    """sing-box app profile: only the box's address goes through the tunnel,
+    the phone's other traffic is untouched."""
+    return {
+        "log": {"level": "warn"},
+        "inbounds": [{"type": "tun", "tag": "tun",
+                      "address": ["172.19.0.1/30"], "auto_route": True,
+                      "strict_route": False,
+                      "route_address": [SERVER_IP + "/32"]}],
+        "outbounds": [
+            {"type": "vless", "tag": "box", "server": host,
+             "server_port": int(px["port"]), "uuid": u["uuid"],
+             "flow": "xtls-rprx-vision",
+             "tls": {"enabled": True, "server_name": px["sni"],
+                     "utls": {"enabled": True, "fingerprint": "chrome"},
+                     "reality": {"enabled": True, "public_key": px["pub"],
+                                 "short_id": px["short_id"]}}},
+            {"type": "direct", "tag": "direct"}],
+        "route": {"auto_detect_interface": True, "final": "direct",
+                  "rules": [{"ip_cidr": [SERVER_IP + "/32"],
+                             "action": "route", "outbound": "box"}]},
+    }
+
+
+def proxy_host(st, override=""):
+    return override or (st.get("duckdns", {}).get("domain") or "YOUR-HOME-ADDRESS")
+
+
+def cmd_proxy_add(st, name, host=""):
+    px = proxy_state(st)
+    if not px.get("enabled"):
+        raise SystemExit("TCP mode is not enabled")
+    if not NAME_RE.match(name):
+        raise SystemExit("bad name")
+    if any(u["name"].lower() == name.lower() for u in px["users"]):
+        raise SystemExit("name already used")
+    u = {"name": name, "uuid": str(uuid.uuid4()), "created": int(time.time())}
+    px["users"].append(u)
+    save(st)
+    proxy_apply(st)
+    h = proxy_host(st, host)
+    print(json.dumps({"link": proxy_link(px, u, h),
+                      "profile": proxy_profile(px, u, h),
+                      "host": h, "port": int(px["port"])}))
+
+
+def cmd_proxy_remove(st, name):
+    px = proxy_state(st)
+    px["users"] = [u for u in px["users"] if u["name"] != name]
+    save(st)
+    if px.get("enabled"):
+        proxy_apply(st, restart=True)     # restart: drops the removed device
+
+
+def cmd_proxy_status(st):
+    px = proxy_state(st)
+    print(json.dumps({
+        "enabled": bool(px.get("enabled")), "running": proxy_running(),
+        "port": int(px.get("port", DEFAULT_PROXY_PORT)),
+        "installed": os.path.exists(SB_BIN), "sni": px.get("sni", DEFAULT_SNI),
+        "host": proxy_host(st),
+        "users": [{"name": u["name"]} for u in px.get("users", [])]}))
+
+
 def main():
     if len(sys.argv) < 2:
         raise SystemExit(__doc__)
@@ -257,6 +537,17 @@ def main():
         cmd_duckdns_update(st)
     elif cmd == "duckdns-update":
         cmd_duckdns_update(st)
+    elif cmd == "proxy-enable":
+        cmd_proxy_enable(st, args)
+    elif cmd == "proxy-disable":
+        cmd_proxy_disable(st)
+    elif cmd == "proxy-add":
+        cmd_proxy_add(st, args[0].strip() if args else "",
+                      args[1].strip() if len(args) > 1 else "")
+    elif cmd == "proxy-remove":
+        cmd_proxy_remove(st, " ".join(args).strip())
+    elif cmd == "proxy-status":
+        cmd_proxy_status(st)
     else:
         raise SystemExit("unknown command")
 

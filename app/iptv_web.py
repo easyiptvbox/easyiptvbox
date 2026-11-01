@@ -18,6 +18,7 @@ import iptv_input as ir
 import iptv_profiles
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
+TUNNEL_PORT = int(os.environ.get("IPTV_TUNNEL_PORT", "8081"))
 UPDATE_STATUS = "/var/lib/iptv-update/status"
 UPDATE_SRC = "/opt/easyiptvbox"
 
@@ -110,6 +111,16 @@ class ControlServer:
         self.httpd.daemon_threads = True
         t = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         t.start()
+        # TCP-mode remote access (sing-box) forwards to this loopback-only port
+        try:
+            tun = socketserver.ThreadingTCPServer(("127.0.0.1", TUNNEL_PORT),
+                                                  handler)
+            tun.daemon_threads = True
+            tun.is_tunnel = True
+            self.tunnel = tun
+            threading.Thread(target=tun.serve_forever, daemon=True).start()
+        except OSError:
+            self.tunnel = None
 
     def set_status(self, screen, playlist="", channel="", selected="",
                    extra=None):
@@ -125,6 +136,13 @@ class ControlServer:
         class Handler(http.server.BaseHTTPRequestHandler):
             def log_message(self, *a):
                 pass  # keep the journal quiet
+
+            def _is_remote(self):
+                """True for WireGuard clients and for the TCP-mode tunnel
+                (its own loopback port)."""
+                import iptv_remote
+                return (getattr(self.server, "is_tunnel", False) or
+                        iptv_remote.from_vpn(self.client_address[0]))
 
             def _send(self, code, body, ctype="application/json"):
                 if isinstance(body, (dict, list)):
@@ -143,7 +161,7 @@ class ControlServer:
                 P = iptv_profiles
                 import iptv_remote
                 try:
-                    if iptv_remote.from_vpn(self.client_address[0]):
+                    if self._is_remote():
                         self._send(403, {"error": "Change profiles from home"})
                         return
                 except Exception:
@@ -211,7 +229,7 @@ class ControlServer:
             def _handle_livepic_post(self, path, raw):
                 import iptv_livepics, iptv_remote
                 try:
-                    if iptv_remote.from_vpn(self.client_address[0]):
+                    if self._is_remote():
                         self._send(403, {"error": "Change pictures from home"})
                         return
                 except Exception:
@@ -243,7 +261,7 @@ class ControlServer:
                     d = {}
                 try:
                     # managing remote access is only allowed from home
-                    if iptv_remote.from_vpn(self.client_address[0]):
+                    if self._is_remote():
                         self._send(403, {"error": "Change remote access "
                                          "settings from home"})
                         return
@@ -260,6 +278,17 @@ class ControlServer:
                                                time.time())
                         outer.q.put("__remote_qr__")
                         return
+                    elif path == "/api/remote/proxy-enable":
+                        iptv_remote.proxy_enable(bool(d.get("on")), d.get("port"))
+                    elif path == "/api/remote/proxy-add":
+                        info = iptv_remote.proxy_add(str(d.get("name", "")),
+                                                     str(d.get("host", "")))
+                        info["qr"] = iptv_remote.qr_svg(info["link"])
+                        info["ok"] = True
+                        self._send(200, info)
+                        return
+                    elif path == "/api/remote/proxy-remove":
+                        iptv_remote.proxy_remove(str(d.get("name", "")))
                     elif path == "/api/remote/remove":
                         iptv_remote.remove_device(str(d.get("name", "")))
                     else:
@@ -341,7 +370,7 @@ class ControlServer:
                 if path == "/api/remote/status":
                     import iptv_remote
                     st = iptv_remote.status()
-                    st["via_vpn"] = iptv_remote.from_vpn(self.client_address[0])
+                    st["via_vpn"] = self._is_remote()
                     self._send(200, st)
                     return
                 if path == "/api/update/status":
@@ -1535,6 +1564,36 @@ PAGE = r"""<!DOCTYPE html>
           config file instead</a>
       </div>
 
+      <details id="tcpBox" style="margin-top:1rem"><summary>TCP mode &ndash; for countries that block WireGuard</summary>
+        <div class="pnote">Some networks block WireGuard (UDP). TCP mode looks like ordinary
+          secure web traffic (VLESS + Reality) and also only reaches this box. Phones use the
+          free <b>sing-box</b> app (Android: SFA, iPhone: SFI) or Hiddify instead of WireGuard.
+          Forward <b>TCP port <span class="tcpPortTxt">8443</span></b> in the router to
+          <b><span class="raLan">192.168.0.168</span></b>.</div>
+        <div id="tcpStatus" class="pnote"></div>
+        <div class="minirow">
+          <input type="number" id="tcpPort" min="1024" max="65535" value="8443" style="max-width:7rem">
+          <button class="ghost" id="tcpToggle" style="flex:1">&hellip;</button>
+        </div>
+        <label>Devices</label>
+        <div id="tcpDevices"></div>
+        <div class="minirow" style="margin-top:.5rem">
+          <input type="text" id="tcpNewName" placeholder="Device name, e.g. Ali phone">
+          <button class="ghost" id="tcpAdd" style="flex:0 0 auto">Add device</button>
+        </div>
+        <input type="text" id="tcpHost" placeholder="Address in the profile (optional, default: the DuckDNS name)" style="margin-top:.4rem">
+        <div id="tcpOut" style="display:none;margin-top:.8rem;text-align:center">
+          <div id="tcpQrImg" style="background:#fff;padding:10px;border-radius:10px;display:inline-block;max-width:280px;width:100%"></div>
+          <div class="pnote">Shown only once. It contains the device's secret &ndash; send it only to
+            that person. <b>Link:</b> import in Hiddify / v2rayNG / Streisand. <b>Profile file:</b>
+            import in the sing-box app (only the box goes through the tunnel, the rest of the phone's
+            internet is untouched).</div>
+          <a class="pbtn alt" id="tcpProfDl" href="#" download="easyiptvbox.json">Download the sing-box profile</a>
+          <a class="pbtn alt" id="tcpCopy" href="#">Copy the link</a>
+          <div class="pnote">After connecting, open <b>http://10.66.0.1:8080</b> in the phone's browser.</div>
+        </div>
+      </details>
+
       <details style="margin-top:1rem"><summary>How to set it up</summary>
         <ol class="pnote" style="padding-left:1.2rem">
           <li><b>Router &ndash; reserve the address:</b> in the router's DHCP settings, reserve
@@ -2156,6 +2215,43 @@ $('updBtn').onclick=async()=>{
 };
 
 // ---- Remote access ----
+async function loadTcp(px){
+  const box=$('tcpBox'); if(!box) return;
+  if(!px){ $('tcpStatus').textContent='TCP mode is not available on this box (update needed).'; return; }
+  $('tcpStatus').textContent=(px.enabled?(px.running?'TCP mode is ON':'TCP mode is enabled but not running'):'TCP mode is OFF')+' (TCP '+px.port+').'+(px.enabled&&!px.running?' Check the box log: journalctl -u iptv-proxy.':'');
+  if(document.activeElement!==$('tcpPort')) $('tcpPort').value=px.port;
+  document.querySelectorAll('.tcpPortTxt').forEach(e=>e.textContent=px.port);
+  $('tcpToggle').textContent=px.enabled?'Turn TCP mode off':'Turn TCP mode on';
+  $('tcpToggle').onclick=async()=>{
+    $('tcpStatus').textContent=px.enabled?'Turning off\u2026':'Turning on (the first time this downloads about 15 MB)\u2026';
+    try{ await postJ('/api/remote/proxy-enable',{on:!px.enabled,port:parseInt($('tcpPort').value,10)||8443}); }catch(e){}
+    loadRemote();
+  };
+  const dev=$('tcpDevices'); dev.innerHTML='';
+  (px.users||[]).forEach(u=>{
+    const row=document.createElement('div'); row.className='minirow'; row.style.cssText='align-items:center;margin:.3rem 0';
+    const l=document.createElement('div'); l.style.flex='1'; l.textContent=u.name; row.appendChild(l);
+    const b=document.createElement('button'); b.className='ghost'; b.style.flex='0 0 auto'; b.textContent='Remove';
+    b.onclick=async()=>{ if(!confirm('Remove "'+u.name+'"? It stops working at once.')) return;
+      try{ await postJ('/api/remote/proxy-remove',{name:u.name}); }catch(e){} loadRemote(); };
+    row.appendChild(b); dev.appendChild(row);
+  });
+  if(!(px.users||[]).length) dev.innerHTML='<div style="color:var(--dim)">None yet.</div>';
+}
+$('tcpAdd').onclick=async()=>{
+  const name=$('tcpNewName').value.trim();
+  if(!name){ alert('Enter a device name first'); return; }
+  try{
+    const j=await postJ('/api/remote/proxy-add',{name:name,host:$('tcpHost').value.trim()});
+    $('tcpQrImg').innerHTML=j.qr;
+    const svg=$('tcpQrImg').querySelector('svg'); if(svg){svg.style.width='100%';svg.style.height='auto';}
+    $('tcpProfDl').href='data:application/json;charset=utf-8,'+encodeURIComponent(JSON.stringify(j.profile,null,1));
+    $('tcpProfDl').download=name.replace(/[^A-Za-z0-9_-]+/g,'_')+'.json';
+    $('tcpCopy').onclick=async(e)=>{ e.preventDefault(); try{ await navigator.clipboard.writeText(j.link); $('tcpCopy').textContent='Copied'; }catch(err){ prompt('Copy this link',j.link); } };
+    $('tcpOut').style.display=''; $('tcpNewName').value='';
+  }catch(e){}
+  loadRemote();
+};
 async function loadRemote(){
   let st;
   try{ st=await (await fetch('/api/remote/status')).json(); }catch(e){ return; }
@@ -2169,6 +2265,7 @@ async function loadRemote(){
     +(dd.last_error?(' \u2013 '+dd.last_error):'')+'.'):' DuckDNS not set.';
   if(st.via_vpn) t+=' (You are connected over the VPN \u2013 change these settings from home.)';
   $('raStatus').textContent=t;
+  loadTcp(st.proxy);
   $('raToggle').textContent=st.enabled?'Turn remote access off':'Turn remote access on';
   $('raToggle').onclick=async()=>{ await postJ('/api/remote/enable',{on:!st.enabled}); loadRemote(); };
   if(!$('raDomain').value) $('raDomain').value=dd.domain||'';

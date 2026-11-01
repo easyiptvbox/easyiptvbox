@@ -39,6 +39,7 @@ HELP_PAGE = r"""<!DOCTYPE html>
  <a href="#series">TV series</a>
  <a href="#live">Live categories</a>
  <a href="#epg">TV guide</a>
+ <a href="#tcpmode">TCP mode</a>
  <a href="#profiles">Profiles</a>
  <a href="#appearance">Appearance</a>
  <a href="#playback">Playback</a>
@@ -138,6 +139,20 @@ pick a series, a season and an episode. &ldquo;Add future results automatically&
 channels automatically and refreshed every 24 hours.</p>
 <p><b>Provider lists refresh every (hours)</b> controls how often the channel, movie and
 series lists are downloaded again (only while nothing is playing). Saved searches are checked then.</p>
+</section>
+
+<section id="tcpmode"><h2>TCP mode (if WireGuard is blocked)</h2>
+<p>Some countries block WireGuard. <b>TCP mode</b> (Settings &gt; Remote access) uses an ordinary-looking secure TCP
+connection (VLESS + Reality) instead. It can be on at the same time as WireGuard.</p>
+<ol>
+ <li>In the router, forward <b>TCP port 8443</b> (or the port you choose) to the box.</li>
+ <li>Turn <b>TCP mode</b> on (the first time the box downloads a small program).</li>
+ <li><b>Add device</b>: a QR code, a link and a profile file are shown once. Send it only to that person: it is their secret.</li>
+ <li>On the phone install the free <b>sing-box</b> app (Android: SFA, iPhone: SFI) or Hiddify, import the profile file
+  (or the link), and connect. Then open <b>http://10.66.0.1:8080</b> in the browser.</li>
+</ol>
+<p>Like WireGuard it only reaches this box, never the rest of your network. If the box's address changes, send a new
+profile. Whether it works from inside a country that blocks traffic can change over time and cannot be guaranteed.</p>
 </section>
 
 <section id="profiles"><h2>Profiles</h2>

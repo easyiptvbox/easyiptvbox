@@ -302,6 +302,8 @@ def sb_config(px):
             "listen_port": int(px["port"]),
             "users": [{"name": u["name"], "uuid": u["uuid"],
                        "flow": "xtls-rprx-vision"} for u in px["users"]],
+            # apps such as Hiddify multiplex their connections
+            "multiplex": {"enabled": True},
             "tls": {"enabled": True, "server_name": px["sni"],
                     "reality": {"enabled": True,
                                 "handshake": {"server": px["sni"],
@@ -412,16 +414,20 @@ def cmd_proxy_refresh(st):
     px = proxy_state(st)
     if not px.get("enabled") or not os.path.exists(SB_BIN):
         return
-    try:
-        old = open(SB_UNIT).read()
-    except OSError:
-        old = ""
-    if old != SB_UNIT_TEXT:
+    def read(path):
+        try:
+            return open(path).read()
+        except OSError:
+            return ""
+    old_unit, old_conf = read(SB_UNIT), read(SB_CONF)
+    if old_unit != SB_UNIT_TEXT:
         with open(SB_UNIT, "w") as f:
             f.write(SB_UNIT_TEXT)
     sb_keys(px)
     save(st)
-    proxy_apply(st, restart=(old != SB_UNIT_TEXT or not proxy_running()))
+    sb_write(px)
+    changed = (old_unit != SB_UNIT_TEXT) or (read(SB_CONF) != old_conf)
+    proxy_apply(st, restart=(changed or not proxy_running()))
 
 
 def cmd_proxy_disable(st):

@@ -38,6 +38,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - README points to the QR code on the TV start page for opening the web app.
 
 **Fixed**
+- TCP mode: apps that multiplex their connections (Hiddify) connected but got no data, because the box did not accept multiplexing. It does now; updating restarts the service with the new setting.
 - TCP mode: the service crashed at start on the Pi (its security settings blocked a socket type sing-box needs), so connections timed out. Fixed; updating also repairs an already-enabled TCP mode automatically.
 - The TV guide is shared by all profiles: the automatic guide is now built from the channels of every profile, so switching to an empty profile no longer leaves it without guide data.
 - Saved searches ("add future results automatically") now show the selected profile's own list; after switching profiles the web app kept showing the previous profile's searches.

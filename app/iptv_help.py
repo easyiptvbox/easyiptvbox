@@ -151,6 +151,8 @@ connection (VLESS + Reality) instead. It can be on at the same time as WireGuard
  <li>On the phone install the free <b>sing-box</b> app (Android: SFA, iPhone: SFI) or Hiddify, import the profile file
   (or the link), and connect. Then open <b>http://10.66.0.1:8080</b> in the browser.</li>
 </ol>
+<p>Some apps (Hiddify) show a red "Timeout" in their connection test even when it works, because the test visits a public
+website and the box only allows its own web app. Judge by whether <b>http://10.66.0.1:8080</b> opens.</p>
 <p>Like WireGuard it only reaches this box, never the rest of your network. If the box's address changes, send a new
 profile. Whether it works from inside a country that blocks traffic can change over time and cannot be guaranteed.</p>
 </section>

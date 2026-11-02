@@ -1908,6 +1908,7 @@ class App:
 
     def _launch(self, url, **kwargs):
         """Show a loading screen, release DRM, then start mpv."""
+        self._crop_done = False
         # Apply the configured live-TV audio-sync offset (seconds) to live
         # streams only. Movies/series keep the stream's own timing.
         if kwargs.get("live") and "audio_delay" not in kwargs:
@@ -3240,6 +3241,18 @@ class App:
                                 self.notify("Recovering playback...", 2)
                                 self._launch(self.current_channel.url, live=True)
                                 self.screen_state = SCREEN_PLAYING
+
+            # movies / episodes: trim a padded bottom edge (thin green line)
+            if (self.screen_state == SCREEN_PLAYING and self.is_movie_playing()
+                    and self.player.is_running()
+                    and not getattr(self, "_crop_done", False)):
+                now = time.time()
+                if now - getattr(self, "_last_crop_try", 0) > 1.5:
+                    self._last_crop_try = now
+                    try:
+                        self._crop_done = self.player.auto_crop()
+                    except Exception:
+                        self._crop_done = True
 
             # Live stream that never started or ended while mpv stays alive
             # (--idle=yes): the screen would stay black. Retry, then give up.

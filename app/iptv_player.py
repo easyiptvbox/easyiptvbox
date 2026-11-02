@@ -239,6 +239,23 @@ class Player:
     def set_property(self, name, value):
         self._command("set_property", name, value)
 
+    def auto_crop(self):
+        """Hide the padding rows some encodes leave at the bottom.
+
+        A video whose decoded height is not a multiple of 8 (for example
+        3840x1754) can show a thin green line at the bottom, because the
+        hardware decoder pads the frame. Trim up to 7 rows so the height is a
+        multiple of 8. Returns True when this video has been handled (cropped
+        or nothing to do), False if the size is not known yet."""
+        vp = self.get_property("video-params")
+        if not isinstance(vp, dict) or not vp.get("w") or not vp.get("h"):
+            return False
+        w, h = int(vp["w"]), int(vp["h"])
+        extra = h % 8
+        if extra and h > 64:
+            self.set_property("video-crop", "%dx%d+0+0" % (w, h - extra))
+        return True
+
     # -- movie playback controls ----------------------------------------
     def toggle_pause(self):
         self._command("cycle", "pause")

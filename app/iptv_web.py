@@ -1256,6 +1256,12 @@ PAGE = r"""<!DOCTYPE html>
             font-size:.95rem; margin-top:.4rem; }
   .del { background:var(--errbg); border:none; color:var(--errtx); border-radius:8px;
          padding:.4rem .7rem; cursor:pointer; font-size:.85rem; }
+  #config .card > h2 { cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none; margin-bottom:.4rem; }
+  #config .card > h2::after { content:'\25BE'; color:var(--dim); font-size:1rem; margin-left:.6rem; transition:transform .15s; }
+  #config #profCard > h2::after { content:none; }
+  #config .card.collapsed > h2 { margin-bottom:0; }
+  #config .card.collapsed > h2::after { transform:rotate(-90deg); }
+  #config .card.collapsed > :not(h2) { display:none !important; }
   .cfgbar { display:flex; gap:.6rem; margin:1rem 0; position:sticky; bottom:0;
             background:var(--bg); padding:.6rem 0; }
   .save { background:var(--accent2); color:#06210f; border:none; padding:.8rem 1.2rem;
@@ -1360,7 +1366,11 @@ PAGE = r"""<!DOCTYPE html>
   </section>
 
   <section id="config">
-    <p style="margin:0 0 .6rem;color:var(--dim);font-size:.85rem">Tap a section title for help, or
+    <div style="display:flex;gap:.5rem;margin:0 0 .6rem">
+      <button class="ghost" id="cardsOpen" style="flex:1;padding:.4rem">Open all</button>
+      <button class="ghost" id="cardsClose" style="flex:1;padding:.4rem">Close all</button>
+    </div>
+    <p style="margin:0 0 .6rem;color:var(--dim);font-size:.85rem">Tap a section title to open or close it (the <b>?</b> opens help), or
       <a href="/help" target="_blank" rel="noopener" style="color:var(--accent)">read all instructions</a>.</p>
     <div class="msg" id="msg"></div>
 
@@ -2057,6 +2067,23 @@ $('wifiSetupBtn').onclick=async()=>{
   showMsg(true,'Look at the TV to finish Wi-Fi setup.');
 };
 loadRemotes();
+
+// ---- Collapsible Settings cards (closed by default, choice remembered) ----
+(function(){
+  const cards=[...document.querySelectorAll('#config .card')].filter(c=>c.querySelector(':scope > h2'));
+  let open={}; try{ open=JSON.parse(localStorage.getItem('openCards')||'{}'); }catch(e){}
+  const key=c=>c.querySelector(':scope > h2').textContent.replace('?','').trim();
+  const save=()=>{ const o={}; cards.forEach(c=>{ if(!c.classList.contains('collapsed')) o[key(c)]=1; }); try{ localStorage.setItem('openCards',JSON.stringify(o)); }catch(e){} };
+  cards.forEach(c=>{
+    const stay=(c.id==='profCard');                 // the profile selector stays open
+    if(!stay && !open[key(c)]) c.classList.add('collapsed');
+    const h=c.querySelector(':scope > h2');
+    if(stay){ h.style.cursor='default'; h.style.setProperty('--x','0'); return; }
+    h.addEventListener('click',e=>{ if(e.target.closest('a')) return; c.classList.toggle('collapsed'); save(); });
+  });
+  $('cardsOpen').onclick=()=>{ cards.forEach(c=>c.classList.remove('collapsed')); save(); };
+  $('cardsClose').onclick=()=>{ cards.forEach(c=>{ if(c.id!=='profCard') c.classList.add('collapsed'); }); save(); };
+})();
 
 // ---- Theme (shared with the TV; saved with the other settings) ----
 $('themeSel').addEventListener('change',()=>{ document.documentElement.dataset.theme=$('themeSel').value; });

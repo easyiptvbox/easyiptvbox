@@ -24,6 +24,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - Movies can be streamed to your phone/computer (Safari player, VLC, download).
 
 **Changed**
+- The cards on the web app's Settings page are now **collapsed by default**: tap a title to open or close it, or use Open all / Close all. Your choices are remembered in the browser. The Profile selector always stays open. (Thanks for the suggestion, issue #2.)
 - The box now checks how many simultaneous connections your provider allows (at start and with every provider refresh) and uses it for the picture scan: with 1 connection it scans one channel at a time, with more it scans several in parallel (always leaving one connection free for watching).
 - The picture scan starts each grab a little faster (smaller stream probe).
 - In the dark theme the TV's QR code is now dark too (light squares on a dark background).

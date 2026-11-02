@@ -242,9 +242,10 @@ class Player:
     def auto_crop(self):
         """Clean up the picture of movies / episodes with odd metadata.
 
-        1. Padding rows: a decoded height that is not a multiple of 16 (for
+        1. Padding rows: a decoded height that is not a multiple of 8 (for
            example 3840x1754) can show a thin green line at the bottom, so
-           trim up to 15 rows.
+           trim it to a multiple of 16 (1754 -> 1744). Normal heights such
+           as 1080, 2160 or 800 are left alone.
         2. Wrong aspect ratio: some files store a wide picture (for example
            3840x1754, 2.19:1) but are tagged 16:9, which stretches the image
            vertically. HD/4K video has square pixels, so when the picture is
@@ -256,8 +257,8 @@ class Player:
         if not isinstance(vp, dict) or not vp.get("w") or not vp.get("h"):
             return False
         w, h = int(vp["w"]), int(vp["h"])
-        if h > 64 and h % 16:
-            h -= h % 16             # multiple of 16: also hides the padded rows
+        if h > 64 and h % 8:        # odd height: the decoder pads the frame
+            h -= h % 16             # trim to a multiple of 16 (8 was not enough)
             self.set_property("video-crop", "%dx%d+0+0" % (w, h))
         dar = vp.get("aspect")
         if w >= 1280 and h > 64 and isinstance(dar, (int, float)) and dar > 0:

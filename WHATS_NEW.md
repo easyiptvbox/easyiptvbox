@@ -39,6 +39,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - README points to the QR code on the TV start page for opening the web app.
 
 **Fixed**
+- Movies and episodes whose file is tagged 16:9 but whose picture is wider (for example 3840x1754) no longer look stretched vertically: the player shows them at their real shape, with black bars above and below.
 - Movies and episodes with a padded bottom edge no longer show a thin green line: the player trims the few extra rows automatically (hardware decoding is kept).
 - The "Download the config / sing-box profile" buttons did nothing on many phones. They now make a real file, and there are new **Share / open in the app** and **Copy the text** buttons as alternatives (the profile or config can be pasted into the app).
 - TCP mode: the box is now reached at **http://192.0.2.1:8080** instead of 10.66.0.1. Apps like Hiddify keep private addresses (10.x) outside the tunnel ("bypass LAN"), so the page never opened. The tunnel status in Settings now also shows when the last page request came through. Updating restarts the service.

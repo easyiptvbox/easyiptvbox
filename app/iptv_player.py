@@ -240,20 +240,30 @@ class Player:
         self._command("set_property", name, value)
 
     def auto_crop(self):
-        """Hide the padding rows some encodes leave at the bottom.
+        """Clean up the picture of movies / episodes with odd metadata.
 
-        A video whose decoded height is not a multiple of 8 (for example
-        3840x1754) can show a thin green line at the bottom, because the
-        hardware decoder pads the frame. Trim up to 7 rows so the height is a
-        multiple of 8. Returns True when this video has been handled (cropped
-        or nothing to do), False if the size is not known yet."""
+        1. Padding rows: a decoded height that is not a multiple of 8 (for
+           example 3840x1754) can show a thin green line at the bottom, so
+           trim up to 7 rows.
+        2. Wrong aspect ratio: some files store a wide picture (for example
+           3840x1754, 2.19:1) but are tagged 16:9, which stretches the image
+           vertically. HD/4K video has square pixels, so when the picture is
+           clearly wider than the tagged shape, show it at its real shape.
+
+        Returns True when this video has been handled (or nothing to do),
+        False if the size is not known yet."""
         vp = self.get_property("video-params")
         if not isinstance(vp, dict) or not vp.get("w") or not vp.get("h"):
             return False
         w, h = int(vp["w"]), int(vp["h"])
-        extra = h % 8
-        if extra and h > 64:
-            self.set_property("video-crop", "%dx%d+0+0" % (w, h - extra))
+        if h > 64 and h % 8:
+            h -= h % 8
+            self.set_property("video-crop", "%dx%d+0+0" % (w, h))
+        dar = vp.get("aspect")
+        if w >= 1280 and h > 64 and isinstance(dar, (int, float)) and dar > 0:
+            stored = w / float(h)
+            if stored > dar * 1.08:
+                self.set_property("video-aspect-override", round(stored, 6))
         return True
 
     # -- movie playback controls ----------------------------------------

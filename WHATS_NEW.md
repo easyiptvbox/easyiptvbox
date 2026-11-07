@@ -5,6 +5,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 26 October 2026
 
 **New**
+- **Simple mode** (Settings > Simple mode): for someone who just wants to watch TV. The box boots straight onto a channel, the arrow buttons switch between channels you picked (from several categories, in your order), and OK shows them as a list. Back/Home/Menu do nothing; the power button still works. It remembers the last channel, skips channels that don't work, and is turned off again in the web app.
 - **TCP mode** for remote access (Settings > Remote access): a second way to reach the box from networks that block WireGuard. It uses VLESS + Reality (sing-box) on a TCP port you choose (default 8443), works with the sing-box, Hiddify and v2rayNG apps, only reaches the box, and is off until you turn it on.
 - **Profiles**: several people can have their own Movies, Live and Series categories, theme, text size, watch history and live pictures. Settings > Profile switches the profile in the web app (the Default profile is always shown and the TV starts on it), and Settings > Manage profiles adds, renames, protects with an optional 4-6 digit PIN, gives a picture to, or deletes profiles; a new profile can start empty or as a copy. On the TV the profiles are listed above the QR code. Provider login, TV guide, audio sync, remotes and Wi-Fi stay shared.
 - Settings in the web app now **save by themselves**: the Save & Apply and Cancel buttons are gone. A small "Saved" note appears when a change is stored. If you change a setting while watching TV, the picture is not interrupted; the TV applies the change when you leave the stream.
@@ -39,6 +40,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - README points to the QR code on the TV start page for opening the web app.
 
 **Fixed**
+- Quick, overlapping saves in Settings could garble `config.yaml` (two saves wrote to the same temporary file at once). Saves are now serialised and use their own temporary files.
 - Movies and episodes whose file is tagged 16:9 but whose picture is wider (for example 3840x1754) no longer look stretched vertically: the player shows them at their real shape, with black bars above and below.
 - Movies and episodes with a padded bottom edge no longer show a thin green line: the player trims up to 15 extra rows (to a multiple of 16) automatically, and keeps hardware decoding.
 - The "Download the config / sing-box profile" buttons did nothing on many phones. They now make a real file, and there are new **Share / open in the app** and **Copy the text** buttons as alternatives (the profile or config can be pasted into the app).

@@ -43,6 +43,7 @@ MAX_PROFILES = 12
 ACTIVE = DEFAULT              # the profile the TV is showing
 _local = threading.local()    # profile of the current web request
 _lock = threading.RLock()
+CONFIG_LOCK = threading.RLock()   # serialises every config.yaml read-modify-write
 _tokens = {}                  # unlock token -> profile id
 _fails = {}                   # profile id -> (count, locked until)
 _cache = {"mtime": None, "data": None}
@@ -300,10 +301,12 @@ def write_config_text(text, pid=None):
     if pid != DEFAULT:
         text = profile_text(text)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    with CONFIG_LOCK:
+        # unique temp file: two overlapping saves must never share one
+        tmp = "%s.%d.%d.tmp" % (path, os.getpid(), threading.get_ident())
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+        os.replace(tmp, path)
 
 
 # ----------------------------------------------------------- management

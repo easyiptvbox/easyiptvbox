@@ -179,6 +179,10 @@ class ControlServer:
                                     not self._is_remote()}
 
             def _handle_simple_set(self, raw):
+                with iptv_profiles.CONFIG_LOCK:
+                    self._handle_simple_set_locked(raw)
+
+            def _handle_simple_set_locked(self, raw):
                 """Save simple mode: on/off and the ordered list of channel ids
                 (the box looks up the stream addresses itself)."""
                 import iptv_stream
@@ -1044,27 +1048,33 @@ class ControlServer:
                 an error + returns False on failure."""
                 path = iptv_profiles.config_path()
                 try:
-                    if os.path.exists(path):
-                        with open(path, "r", encoding="utf-8") as f:
-                            old = f.read()
-                        with open(path + ".bak", "w", encoding="utf-8") as f:
-                            f.write(old)
-                        # dated history: keep the last 10 versions
-                        import time as _t, glob as _g
-                        if old.strip():
-                            hist = path + ".%s.bak" % _t.strftime(
-                                "%Y%m%d-%H%M%S")
-                            with open(hist, "w", encoding="utf-8") as f:
+                    with iptv_profiles.CONFIG_LOCK:
+                        if os.path.exists(path):
+                            with open(path, "r", encoding="utf-8") as f:
+                                old = f.read()
+                            with open(path + ".bak", "w", encoding="utf-8") as f:
                                 f.write(old)
-                            for oldf in sorted(_g.glob(path + ".2*.bak"))[:-10]:
-                                os.remove(oldf)
-                    iptv_profiles.write_config_text(text)
+                            # dated history: keep the last 10 versions
+                            import time as _t, glob as _g
+                            if old.strip():
+                                hist = path + ".%s.bak" % _t.strftime(
+                                    "%Y%m%d-%H%M%S")
+                                with open(hist, "w", encoding="utf-8") as f:
+                                    f.write(old)
+                                for oldf in sorted(
+                                        _g.glob(path + ".2*.bak"))[:-10]:
+                                    os.remove(oldf)
+                        iptv_profiles.write_config_text(text)
                     return True
                 except Exception as e:
                     self._send(500, {"error": "save failed: %s" % e})
                     return False
 
             def _handle_save_config_data(self, raw):
+                with iptv_profiles.CONFIG_LOCK:
+                    self._handle_save_config_data_locked(raw)
+
+            def _handle_save_config_data_locked(self, raw):
                 """Receive structured config as JSON (from the form), write YAML."""
                 try:
                     data = json.loads(raw or b"{}")
@@ -1555,6 +1565,25 @@ PAGE = r"""<!DOCTYPE html>
     </div>
 
 
+    <div class="card" id="smCard">
+      <h2><a class="hl" href="/help#simple" target="_blank" rel="noopener">Simple mode <span class="hi">?</span></a></h2>
+      <div class="pnote" style="margin-top:0">For someone who just wants to watch TV: the box starts straight on a channel,
+        the arrow buttons switch between the channels below, and OK shows them as a list.
+        Back, Home and Menu do nothing. Turn this off here to get the normal menus back.
+        This setting is shared by the whole box.</div>
+      <label style="display:flex;gap:.6rem;align-items:center;margin-top:.7rem;cursor:pointer">
+        <input type="checkbox" id="smOn" style="width:auto;margin:0">
+        <span>Simple mode is on</span>
+      </label>
+      <label>Channels in the list (in this order)</label>
+      <div id="smList"></div>
+      <label style="margin-top:.8rem">Add channels</label>
+      <select id="smCat"></select>
+      <input type="text" id="smFilter" placeholder="Filter by name" style="margin-top:.4rem" autocomplete="off">
+      <div id="smResults" style="margin-top:.4rem"></div>
+      <div id="smMsg" class="pnote" style="min-height:1.2em"></div>
+    </div>
+
     <div class="card" id="lpCard">
       <h2>Live thumbnails</h2>
       <div class="pnote">Choose a live category and upload a picture for its tile on the TV.
@@ -1821,7 +1850,7 @@ document.querySelectorAll('.tab[data-tab]').forEach(t=>{
     t.classList.add('active');
     document.querySelectorAll('section').forEach(s=>s.classList.remove('active'));
     document.getElementById(t.dataset.tab).classList.add('active');
-    if(t.dataset.tab==='config'){ loadProfiles().then(loadForm); loadRemote(); loadUpdate(); loadLivePics(); }
+    if(t.dataset.tab==='config'){ loadProfiles().then(loadForm); loadRemote(); loadUpdate(); loadLivePics(); loadSimple(); }
     if(t.dataset.tab==='play') loadPlay();
     else stopPlayer();
   });
@@ -2288,7 +2317,7 @@ function profPicture(p){
 async function afterProfileChange(){
   await loadProfiles();
   await loadForm();
-  loadLivePics(); loadPlay(); loadWatches();
+  loadLivePics(); loadPlay(); loadWatches(); loadSimple();
 }
 async function profSelect(id){
   const p=PROFS.find(x=>x.id===id); if(!p) return;
@@ -2314,6 +2343,76 @@ $('profCreate').onclick=async()=>{
   if(r.ok){ $('profNewName').value=''; $('profNewPin').value=''; profMsg(true,'Profile created.'); await loadProfiles(); }
   else profMsg(false, j.error||'Could not create the profile.');
 };
+
+// ---- Simple mode ----
+let SM={enabled:false,channels:[],editable:true}, SMCAT=[];
+function smMsg(ok,t){ const m=$('smMsg'); m.textContent=t; m.style.color=ok?'var(--oktx)':'var(--errtx)'; }
+let SM_BUSY=false, SM_DIRTY=false;
+async function smSave(){
+  if(SM_BUSY){ SM_DIRTY=true; return; }        // saves go one at a time, newest state last
+  SM_BUSY=true;
+  try{
+    do{
+      SM_DIRTY=false;
+      const r=await fetch('/api/simple/set',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({enabled:SM.enabled,ids:SM.channels.map(c=>c.id)})});
+      const j=await r.json().catch(()=>({}));
+      if(r.ok){ smMsg(true,'Saved'); setTimeout(()=>{ if($('smMsg').textContent==='Saved') smMsg(true,''); },2500); }
+      else{ SM_DIRTY=false; smMsg(false,j.error||'Could not save'); await loadSimple(true); break; }
+    }while(SM_DIRTY);
+  }catch(e){ smMsg(false,'Could not reach the box'); }
+  SM_BUSY=false;
+}
+function smRender(){
+  const ed=SM.editable;
+  $('smOn').checked=SM.enabled; $('smOn').disabled=!ed;
+  ['smCat','smFilter'].forEach(id=>$(id).disabled=!ed);
+  const list=$('smList'); list.innerHTML='';
+  SM.channels.forEach((c,i)=>{
+    const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:.4rem;margin:.25rem 0';
+    const n=document.createElement('div'); n.style.cssText='flex:0 0 1.6rem;color:var(--dim)'; n.textContent=(i+1);
+    const nm=document.createElement('div'); nm.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; nm.textContent=c.name;
+    row.appendChild(n); row.appendChild(nm);
+    const mk=(t,fn,dis)=>{ const b=document.createElement('button'); b.className='ghost'; b.type='button'; b.textContent=t;
+      b.style.cssText='flex:0 0 auto;padding:.25rem .55rem'; b.disabled=!ed||!!dis; b.onclick=fn; row.appendChild(b); };
+    mk('\u2191',()=>{ [SM.channels[i-1],SM.channels[i]]=[SM.channels[i],SM.channels[i-1]]; smRender(); smSave(); },i===0);
+    mk('\u2193',()=>{ [SM.channels[i+1],SM.channels[i]]=[SM.channels[i],SM.channels[i+1]]; smRender(); smSave(); },i===SM.channels.length-1);
+    mk('\u2715',()=>{ SM.channels.splice(i,1); if(!SM.channels.length) SM.enabled=false; smRender(); smSave(); });
+    list.appendChild(row);
+  });
+  if(!SM.channels.length) list.innerHTML='<div style="color:var(--dim)">No channels yet. Add some below.</div>';
+  const cat=SMCAT[$('smCat').value]; const q=$('smFilter').value.trim().toLowerCase();
+  const res=$('smResults'); res.innerHTML='';
+  if(!cat){ res.innerHTML='<div style="color:var(--dim)">Add live categories first (Live categories above).</div>'; return; }
+  const have=new Set(SM.channels.map(c=>c.id));
+  const hits=cat.channels.filter(c=>!q||c.name.toLowerCase().includes(q));
+  hits.slice(0,60).forEach(c=>{
+    const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:.4rem;margin:.2rem 0';
+    const nm=document.createElement('div'); nm.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; nm.textContent=c.name;
+    const b=document.createElement('button'); b.className='ghost'; b.type='button'; b.style.cssText='flex:0 0 auto;padding:.25rem .7rem';
+    if(have.has(c.id)){ b.textContent='\u2713 added'; b.disabled=true; }
+    else{ b.textContent='Add'; b.disabled=!ed; b.onclick=()=>{ SM.channels.push({id:c.id,name:c.name}); smRender(); smSave(); }; }
+    row.appendChild(nm); row.appendChild(b); res.appendChild(row);
+  });
+  if(hits.length>60){ const m=document.createElement('div'); m.className='pnote'; m.textContent='Showing 60 of '+hits.length+' - type in the filter to narrow it down.'; res.appendChild(m); }
+  if(!hits.length) res.innerHTML='<div style="color:var(--dim)">No channels found.</div>';
+  if(!ed) smMsg(false,'Simple mode is a setting of the whole box. Select the Default profile at the top of Settings to change it.');
+}
+async function loadSimple(keepFilter){
+  try{
+    SM=await (await fetch('/api/simple')).json();
+    const c=await (await fetch('/api/play/catalog')).json();
+    SMCAT=c.live||[];
+  }catch(e){ return; }
+  const sel=$('smCat'), keep=sel.value; sel.innerHTML='';
+  SMCAT.forEach((k,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=k.name+' ('+k.channels.length+')'; sel.appendChild(o); });
+  if(keep!==''&&SMCAT[keep]) sel.value=keep;
+  if(!keepFilter) $('smFilter').value='';
+  smRender();
+}
+$('smOn').onchange=()=>{ SM.enabled=$('smOn').checked; smSave(); };
+$('smCat').onchange=()=>{ $('smFilter').value=''; smRender(); };
+$('smFilter').oninput=smRender;
 
 // ---- Live thumbnails ----
 let LP={live:[],have:new Set()};

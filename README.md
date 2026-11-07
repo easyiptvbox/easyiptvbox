@@ -98,6 +98,8 @@ the changes per week (also linked from Settings).
      channels as a picture grid. Tiles show a picture you uploaded in
      *Settings > Live thumbnails*, else the grabbed frame (Menu key to
      refresh), else a colored square.
+   - **Simple mode** (Settings > Simple mode): the box boots straight into a chosen
+     list of live channels; the arrow buttons switch channel and OK shows the list.
    - **Profiles**: with extra profiles created (Settings > Manage profiles) the menu lists
      them above the QR code; PIN-protected profiles ask for a PIN on the TV.
    - **Movies / Series**: a **poster grid** (pictures supplied by your

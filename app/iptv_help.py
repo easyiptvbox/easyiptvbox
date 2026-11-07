@@ -39,6 +39,7 @@ HELP_PAGE = r"""<!DOCTYPE html>
  <a href="#series">TV series</a>
  <a href="#live">Live categories</a>
  <a href="#epg">TV guide</a>
+ <a href="#simple">Simple mode</a>
  <a href="#tcpmode">TCP mode</a>
  <a href="#profiles">Profiles</a>
  <a href="#appearance">Appearance</a>
@@ -139,6 +140,24 @@ pick a series, a season and an episode. &ldquo;Add future results automatically&
 channels automatically and refreshed every 24 hours.</p>
 <p><b>Provider lists refresh every (hours)</b> controls how often the channel, movie and
 series lists are downloaded again (only while nothing is playing). Saved searches are checked then.</p>
+</section>
+
+<section id="simple"><h2>Simple mode</h2>
+<p>For someone who just wants to watch TV. When <b>Simple mode</b> is on (Settings &gt; Simple mode), the box starts
+straight on a channel, with no menus.</p>
+<ul>
+ <li>Choose the channels yourself: add them from your live categories and put them in the order you like (the arrows
+  move a channel up or down). Channels from several categories can be mixed.</li>
+ <li>On the TV the <b>arrow buttons</b> switch to the previous / next channel. A banner shows the number and name
+  (and what is on now, if the TV guide has it). Press the arrows several times quickly and only the last channel opens.</li>
+ <li><b>OK</b> shows the chosen channels as a list; pick one with the arrows and OK, or press Back to keep watching.</li>
+ <li>After a restart the box continues on the channel that was playing last.</li>
+ <li><b>Back, Home and Menu do nothing.</b> The power button still opens the Standby / Power off prompt, Wi-Fi setup and so on.</li>
+ <li>A channel that does not work is retried and then skipped, so the picture never stays black for long.</li>
+ <li>To leave simple mode, turn it off here in the web app (it applies at once). It is a setting of the whole box,
+  so it is changed in the Default profile and ignores other profiles. You can also set <code>simple_mode: enabled: false</code>
+  in config.yaml.</li>
+</ul>
 </section>
 
 <section id="tcpmode"><h2>TCP mode (if WireGuard is blocked)</h2>

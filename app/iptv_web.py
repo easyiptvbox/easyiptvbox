@@ -160,6 +160,95 @@ class ControlServer:
                 self.wfile.write(body)
 
             # ---- GET ----
+            def _simple_state(self):
+                """Simple-mode list as the settings card needs it."""
+                import iptv_stream
+                try:
+                    sm = (iptv_profiles.read_config_data(iptv_profiles.DEFAULT)
+                          .get("simple_mode") or {})
+                except Exception:
+                    sm = {}
+                chans = [{"id": iptv_stream.movie_id(str(c.get("url", ""))),
+                          "name": str(c.get("name", ""))}
+                         for c in (sm.get("channels") or [])
+                         if isinstance(c, dict) and c.get("url")]
+                return {"enabled": bool(sm.get("enabled")) and bool(chans),
+                        "channels": chans,
+                        "editable": iptv_profiles.current() ==
+                                    iptv_profiles.DEFAULT and
+                                    not self._is_remote()}
+
+            def _handle_simple_set(self, raw):
+                """Save simple mode: on/off and the ordered list of channel ids
+                (the box looks up the stream addresses itself)."""
+                import iptv_stream
+                from iptv_config import load_config
+                if self._is_remote():
+                    self._send(403, {"error": "Change simple mode from home"})
+                    return
+                if iptv_profiles.current() != iptv_profiles.DEFAULT:
+                    self._send(403, {"error": "Simple mode is a setting of the "
+                                     "whole box: use the Default profile"})
+                    return
+                try:
+                    d = json.loads(raw or b"{}")
+                    ids = list(dict.fromkeys(
+                        str(i) for i in (d.get("ids") or [])))[:200]
+                    enabled = bool(d.get("enabled"))
+                except Exception:
+                    self._send(400, {"error": "bad request"})
+                    return
+                import yaml as _yy
+                try:
+                    with open(iptv_profiles.BOX_CONFIG, "r",
+                              encoding="utf-8") as f:
+                        data = _yy.safe_load(f) or {}
+                except Exception as e:
+                    self._send(500, {"error": str(e)})
+                    return
+                have = {}
+                for c in ((data.get("simple_mode") or {}).get("channels") or []):
+                    if isinstance(c, dict) and c.get("url"):
+                        have[iptv_stream.movie_id(str(c["url"]))] = c
+                pool = {}
+                try:
+                    cfg = load_config()
+                    for pl in cfg.playlists:
+                        if pl.is_movies or getattr(pl, "is_series", False):
+                            continue
+                        for c in pl.channels:
+                            if c.url:
+                                pool.setdefault(iptv_stream.movie_id(c.url), {
+                                    "name": c.name, "url": c.url,
+                                    "logo": c.logo, "tvg_id": c.tvg_id})
+                except Exception:
+                    pass
+                chans, seen = [], set()
+                for i in ids:
+                    c = have.get(i) or pool.get(i)
+                    if c and i not in seen:
+                        seen.add(i)
+                        chans.append(dict(c))
+                if len(chans) != len(ids):
+                    self._send(400, {"error": "Some channels were not found. "
+                                     "Reload the page and try again."})
+                    return
+                if enabled and not chans:
+                    self._send(400, {"error": "Add at least one channel before "
+                                     "turning simple mode on."})
+                    return
+                data["simple_mode"] = {"enabled": enabled, "channels": chans}
+                try:
+                    text = build_config_yaml(data)
+                    _yy.safe_load(text)
+                except Exception as e:
+                    self._send(400, {"error": "invalid data: %s" % e})
+                    return
+                if not self._write_config(text):
+                    return
+                outer.q.put("__reload_config__")
+                self._send(200, {"ok": True})
+
             def _handle_profiles_post(self, path, raw):
                 P = iptv_profiles
                 import iptv_remote
@@ -325,7 +414,7 @@ class ControlServer:
                 self.send_response(404)
                 self.end_headers()
 
-            PROTECTED = ("/api/config", "/api/play/", "/api/provider/",
+            PROTECTED = ("/api/config", "/api/play/", "/api/provider/", "/api/simple",
                          "/api/saved-searches", "/api/livepic/")
 
             def _enter(self, method):
@@ -405,6 +494,9 @@ class ControlServer:
                         iptv_stream.hls_serve(self, parts[2], parts[3])
                     else:
                         self._send(404, {"error": "not found"})
+                    return
+                if path == "/api/simple":
+                    self._send(200, self._simple_state())
                     return
                 if path == "/api/profiles":
                     self._send(200, {"profiles": iptv_profiles.list_profiles(),
@@ -573,6 +665,9 @@ class ControlServer:
                     self._send(413, {"error": "File too large"})
                     return
                 raw = self.rfile.read(length) if length else b""
+                if path == "/api/simple/set":
+                    self._handle_simple_set(raw)
+                    return
                 if path.startswith("/api/profiles/"):
                     self._handle_profiles_post(path, raw)
                     return
@@ -976,6 +1071,16 @@ class ControlServer:
                 except Exception:
                     self._send(400, {"error": "bad request"})
                     return
+                # the simple-mode list is managed by its own endpoints: whatever
+                # the page sends, keep the saved one (autosave must not erase it)
+                try:
+                    import yaml as _yy
+                    with open(iptv_profiles.BOX_CONFIG, "r",
+                              encoding="utf-8") as f:
+                        data["simple_mode"] = (_yy.safe_load(f) or {}).get(
+                            "simple_mode")
+                except Exception:
+                    data.pop("simple_mode", None)
                 try:
                     text = build_config_yaml(data)
                 except Exception as e:
@@ -1042,6 +1147,9 @@ def build_config_yaml(data):
             "audio_delay_ms": _num(settings.get("audio_delay_ms", 0), 0),
         },
     }
+    sm = _clean_simple_mode(data.get("simple_mode"))
+    if sm:
+        doc["simple_mode"] = sm
     for p in playlists:
         name = s(p.get("name", "")).strip()
         if not name:
@@ -1102,6 +1210,29 @@ def build_config_yaml(data):
     body = yaml.safe_dump(doc, sort_keys=False, allow_unicode=True,
                           default_flow_style=False)
     return header + body
+
+
+def _clean_simple_mode(sm):
+    """Normalise the simple-mode block ({enabled, channels}) for the config."""
+    if not isinstance(sm, dict):
+        return None
+    chans = []
+    for c in (sm.get("channels") or []):
+        if not isinstance(c, dict):
+            continue
+        name = str(c.get("name") or "").strip()
+        url = str(c.get("url") or "").strip()
+        if not name or not url:
+            continue
+        ch = {"name": name, "url": url}
+        if str(c.get("logo") or "").strip():
+            ch["logo"] = str(c["logo"]).strip()
+        if str(c.get("tvg_id") or "").strip():
+            ch["tvg_id"] = str(c["tvg_id"]).strip()
+        chans.append(ch)
+    if not chans and not sm.get("enabled"):
+        return None
+    return {"enabled": bool(sm.get("enabled")) and bool(chans), "channels": chans}
 
 
 def _num(v, default):

@@ -57,6 +57,15 @@ class Config:
         s = self._data.get("settings") or {}
         self.text_scale = TEXT_SIZES.get(str(s.get("text_size", "large")), 1.3)
         self.theme = "light" if str(s.get("theme", "dark")) == "light" else "dark"
+        # "Simple mode": boot straight into a fixed list of live channels.
+        sm = self._data.get("simple_mode") or {}
+        self.simple_channels = []
+        for ch in (sm.get("channels") or []):
+            if isinstance(ch, dict) and ch.get("url") and ch.get("name"):
+                self.simple_channels.append(Channel(
+                    str(ch["name"]), str(ch["url"]), str(ch.get("logo", "")),
+                    str(ch.get("tvg_id", ""))))
+        self.simple_mode = bool(sm.get("enabled")) and bool(self.simple_channels)
         self.autoplay_first = bool(s.get("autoplay_first_channel", False))
         self.show_clock = bool(s.get("show_clock", True))
         # Live-TV audio sync offset, in seconds (config stores milliseconds).

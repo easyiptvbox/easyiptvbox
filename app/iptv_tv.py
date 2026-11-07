@@ -35,6 +35,10 @@ import iptv_profiles
 import iptv_net
 import iptv_stream
 
+# screens that must never be seen in simple mode: it falls back to the channel
+SIMPLE_FALLBACK = ("playlists", "channels", "series", "seasons", "episodes",
+                   "loading", "resume")
+SIMPLE_COLS = 4
 MENU_SCREENS = ("playlists", "channels", "series")   # screens with the left menu
 SECTIONS = ("movies", "live", "series")
 SECTION_LABELS = {"live": "Live", "movies": "Movies", "series": "Series"}
@@ -124,6 +128,8 @@ SCREEN_LEARN = "learn"       # IR remote learning wizard
 SCREEN_WIFI_LIST = "wifi_list"      # pick a Wi-Fi network
 SCREEN_WIFI_KEYBOARD = "wifi_kbd"   # on-screen keyboard for the password
 SCREEN_WIFI_CONNECT = "wifi_connect"  # connecting / result
+SCREEN_SIMPLE = "simple_list"      # simple mode: pick one of the chosen channels
+SCREEN_SIMPLE_MSG = "simple_msg"    # simple mode: status text (waiting / no channel works)
 SCREEN_PIN = "pin"           # numeric PIN pad to open a protected profile
 
 
@@ -142,6 +148,18 @@ class App:
         self._ox = 0               # left offset of the content (menu width)
         self.menu_focus = False    # keyboard focus is in the left menu
         self.menu_prof = None      # highlighted profile row in the menu
+        self.simple_sel = 0        # simple mode: highlighted tile in the list
+        self.simple_msg = ""
+        self._simple_pending = None      # channel index waiting for key presses to settle
+        self._simple_apply_at = 0.0
+        self._simple_retry_at = 0.0
+        self._simple_hold_until = 0.0
+        self._simple_menu_since = 0.0
+        self._simple_started_at = 0.0
+        self._simple_fail = 0
+        self._banner_until = 0.0
+        self._simple_net_ok = True
+        self._simple_net_thread = False
         self._loaded_profile = iptv_profiles.ACTIVE
         self._pin_target = None
         self._pin_buf = ""
@@ -530,6 +548,10 @@ class App:
             self.player.volume_down(); self.notify("Volume -"); return
         if a == "mute":
             self.player.toggle_mute(); self.notify("Mute"); return
+        if self.cfg.simple_mode and self.screen_state in (
+                SCREEN_PLAYING, SCREEN_SIMPLE, SCREEN_SIMPLE_MSG):
+            self._act_simple(a)
+            return
         if self.screen_state == SCREEN_REMOTE:
             self.screen_state = SCREEN_POWER   # any key: back to the menu
             self._last_sig = None
@@ -576,27 +598,36 @@ class App:
             pass
 
     # -- left menu / sections ---------------------------------------------
-    def _load_ui_state(self):
+    def _ui_state_read(self):
         try:
             import json
             with open(_ui_state_path(), "r", encoding="utf-8") as f:
-                sec = json.load(f).get("section")
-            if sec in SECTIONS:
-                return sec
+                d = json.load(f)
+            return d if isinstance(d, dict) else {}
         except Exception:
-            pass
-        return "live"       # first run: Live is the only section with content
+            return {}
 
-    def _save_ui_state(self):
+    def _ui_state_update(self, **kw):
         try:
             import json
+            d = self._ui_state_read()
+            d.update(kw)
             os.makedirs(os.path.dirname(_ui_state_path()), exist_ok=True)
             tmp = _ui_state_path() + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"section": self.section}, f)
+                json.dump(d, f)
             os.replace(tmp, _ui_state_path())
         except Exception:
             pass
+
+    def _load_ui_state(self):
+        sec = self._ui_state_read().get("section")
+        if sec in SECTIONS:
+            return sec
+        return "live"       # first run: Live is the only section with content
+
+    def _save_ui_state(self):
+        self._ui_state_update(section=self.section)
 
     def _live_cats(self):
         return [i for i, p in enumerate(self.cfg.playlists)
@@ -1781,12 +1812,236 @@ class App:
         have = sum(1 for c in chans if iptv_thumbs.has_thumb(c.url))
         return have / len(chans)
 
+    # ==================================================================
+    #  Simple mode: boot straight into a fixed list of live channels
+    # ==================================================================
+    @staticmethod
+    def _ass(s):
+        return (str(s).replace("\\", "/").replace("{", "(").replace("}", ")")
+                .replace("\n", " "))
+
+    def _simple_chans(self):
+        return self.cfg.simple_channels
+
+    def _simple_cols(self):
+        """Bigger tiles when the list is short."""
+        return 3 if len(self._simple_chans()) <= 6 else SIMPLE_COLS
+
+    def _simple_last_index(self):
+        last = self._ui_state_read().get("simple_last")
+        for i, c in enumerate(self._simple_chans()):
+            if c.url == last:
+                return i
+        return 0
+
+    def _simple_set_msg(self, text, retry=0.0):
+        self.simple_msg = text
+        self._simple_retry_at = time.time() + retry if retry else 0.0
+        if self.screen_state != SCREEN_SIMPLE_MSG:
+            self.thumbs.stop()
+            if self.player.is_running():
+                self.player.stop()
+            self._acquire_display()
+            self.screen_state = SCREEN_SIMPLE_MSG
+        self._last_sig = None
+
+    def _simple_start(self, idx=None, auto=False, keep_fail=False):
+        """Play a channel of the simple-mode list (the last watched one when
+        no index is given)."""
+        chans = self._simple_chans()
+        if not chans:
+            return
+        if iptv_profiles.ACTIVE != iptv_profiles.DEFAULT:
+            iptv_profiles.ACTIVE = iptv_profiles.DEFAULT   # box-wide mode
+            self._apply_profile()
+            return
+        if not self._simple_net_ok:
+            self._simple_set_msg("Waiting for the network...", retry=3)
+            return
+        now = time.time()
+        n = len(chans)
+        if idx is None:
+            idx = self._simple_last_index()
+        if auto and now - self._simple_started_at < 20:
+            # the stream keeps dying right after it starts: try the next one
+            self._simple_fail += 1
+            if self._simple_fail >= 2 * n:
+                self._simple_fail = 0
+                self._simple_set_msg("No channel is working right now.\n"
+                                     "Trying again in a moment...", retry=30)
+                return
+            if self._simple_fail >= 2:
+                idx = (self.ch_index + 1) % n
+        elif not auto and not keep_fail:
+            self._simple_fail = 0
+        idx %= n
+        from iptv_config import Playlist
+        pl = Playlist("Simple")
+        pl.channels = list(chans)
+        self.current_playlist = pl
+        self.show_thumbs = False
+        self._grid_play = None
+        self.ch_index = idx
+        self._simple_pending = None
+        self._simple_started_at = now
+        self._idle_tries = 0
+        self._idle_since = 0
+        self.play_channel(idx)
+        if self.screen_state == SCREEN_PLAYING:
+            self._ui_state_update(simple_last=chans[idx].url)
+            self._simple_banner(idx)
+
+    def _simple_banner(self, idx, hold=4.0):
+        """Big channel number + name (+ now playing) over the picture, drawn
+        by mpv itself because mpv owns the screen while a channel plays."""
+        chans = self._simple_chans()
+        if not chans or not self.player.is_running():
+            return
+        ch = chans[idx % len(chans)]
+        body = (r"{\an7}{\pos(70,50)}{\bord3}{\shad0}{\1c&HFFFFFF&}"
+                r"{\3c&H000000&}{\fs60}{\b1}%d  %s{\b0}" % (
+                    idx % len(chans) + 1, self._ass(ch.name)))
+        try:
+            cur, _nxt = self.epg.now_next(ch.tvg_id, ch.name)
+        except Exception:
+            cur = None
+        if cur:
+            body += r"\N{\fs38}%s" % self._ass(cur[2])
+        self.player.osd_show(body)
+        self._banner_until = time.time() + hold
+
+    def _simple_step(self, step):
+        chans = self._simple_chans()
+        n = len(chans)
+        base = self._simple_pending if self._simple_pending is not None \
+            else self.ch_index
+        self._simple_pending = (base + step) % n
+        self._simple_apply_at = time.time() + 0.6   # let quick presses settle
+        if self.screen_state == SCREEN_PLAYING:
+            self._simple_banner(self._simple_pending, hold=3.0)
+
+    def _simple_open_list(self):
+        chans = self._simple_chans()
+        self.thumbs.stop()
+        self.player.stop()
+        self._acquire_display()
+        self.simple_sel = self.ch_index % max(1, len(chans))
+        self._simple_pending = None
+        self.screen_state = SCREEN_SIMPLE
+        self._last_sig = None
+        self.thumbs.start([c.url for c in chans])    # pictures for the tiles
+
+    def _act_simple(self, a):
+        chans = self._simple_chans()
+        n = len(chans)
+        if not n:
+            return
+        if self.screen_state == SCREEN_SIMPLE:
+            r = self._poster_nav(a, self.simple_sel, n, cols=self._simple_cols())
+            if r == "ok":
+                self.thumbs.stop()
+                self._simple_start(self.simple_sel)
+            elif r is None:
+                if a == ir.BACK:                  # close the list, keep watching
+                    self.thumbs.stop()
+                    self._simple_start(self.ch_index)
+            else:
+                self.simple_sel = r
+            return
+        if a in (ir.UP, ir.LEFT):
+            self._simple_step(-1)
+        elif a in (ir.DOWN, ir.RIGHT):
+            self._simple_step(1)
+        elif a == ir.OK and self.screen_state == SCREEN_PLAYING:
+            self._simple_open_list()
+        # Back / Home / Menu do nothing: the box stays in simple mode
+
+    def _simple_tick(self):
+        """Called every main-loop pass while simple mode is on."""
+        now = time.time()
+        if not self._simple_net_thread:
+            self._simple_net_thread = True
+
+            def poll():
+                while True:
+                    try:
+                        self._simple_net_ok = iptv_net.has_network(timeout=3)
+                    except Exception:
+                        self._simple_net_ok = True
+                    time.sleep(3)
+            threading.Thread(target=poll, daemon=True).start()
+        if self._banner_until and now > self._banner_until:
+            self._banner_until = 0.0
+            if self.screen_state == SCREEN_PLAYING:
+                self.player.osd_clear()
+        if (self._simple_pending is not None and now >= self._simple_apply_at
+                and self.screen_state == SCREEN_PLAYING):
+            idx, self._simple_pending = self._simple_pending, None
+            if idx == self.ch_index:            # pressed around back to it
+                if self.player.is_running():
+                    self._simple_banner(idx)
+                return
+            self._simple_start(idx)
+            return
+        if self.screen_state == SCREEN_SIMPLE_MSG and self._simple_retry_at \
+                and now >= self._simple_retry_at:
+            self._simple_retry_at = 0.0
+            self._simple_start(None if not self.current_playlist
+                               else self.ch_index)
+            return
+        # any normal screen (after the power menu, wake from standby, a dead
+        # stream, a settings reload ...) goes straight back to the channel
+        if self.screen_state in SIMPLE_FALLBACK:
+            if not self._simple_menu_since:
+                self._simple_menu_since = now
+            if (now - self._simple_menu_since > 0.3
+                    and now >= self._simple_hold_until):
+                self._simple_menu_since = 0.0
+                self._simple_start(
+                    None if not self.current_playlist else self.ch_index,
+                    auto=True)
+        else:
+            self._simple_menu_since = 0.0
+
+    def _draw_simple_channels(self):
+        chans = self._simple_chans()
+
+        def get(k):
+            c = chans[k]
+            pic = iptv_livepics.find(iptv_livepics.chan_key(c.url))
+            if not pic and iptv_thumbs.has_thumb(c.url):
+                pic = iptv_thumbs.thumb_path(c.url)
+            return (c.name, pic or "", False)
+        self._draw_poster_grid("Choose a channel", len(chans), get,
+                               self.simple_sel, "", cols=self._simple_cols(),
+                               rows=2 if self._simple_cols() == 3 else 3,
+                               aspect=16 / 9, colored=True, cover=True)
+
+    def _draw_simple_msg(self, text=None):
+        lines = (text or self.simple_msg or "").split("\n")
+        y = int(self.H * 0.40)
+        for ln in lines:
+            s = self.f_item.render(ln, True, TEXT)
+            self.surface.blit(s, (self.W // 2 - s.get_width() // 2, y))
+            y += s.get_height() + 8
+        h = self.f_hint.render("Press the power button for settings", True, DIM)
+        self.surface.blit(h, (self.W // 2 - h.get_width() // 2,
+                              self.H - h.get_height() - 24))
+
     def _play_on_tv(self, req):
         """"Play on TV" from the web app: start a channel / movie / episode."""
         if not req:
             return
         if self.screen_state == SCREEN_STANDBY:
             self._wake_from_standby()
+        if self.cfg.simple_mode:
+            # only channels of the simple list can be played on the TV
+            for i, c in enumerate(self._simple_chans()):
+                if req.get("kind") == "live" and c.url == req.get("url"):
+                    self._simple_start(i)
+                    return
+            self.notify("Simple mode is on", 3)
+            return
         if self.screen_state in (SCREEN_LEARN, SCREEN_WIFI_LIST,
                                  SCREEN_WIFI_KEYBOARD, SCREEN_WIFI_CONNECT,
                                  SCREEN_REMOTE, SCREEN_HELP):
@@ -1984,6 +2239,18 @@ class App:
             return
         self.surface.fill(BG)
         self._ox = 0
+        if self.cfg.simple_mode and self.screen_state in SIMPLE_FALLBACK:
+            self._draw_simple_msg("Starting...")      # never show the menus
+            self._draw_message()
+            return
+        if self.screen_state == SCREEN_SIMPLE:
+            self._draw_simple_channels()
+            self._draw_message()
+            return
+        if self.screen_state == SCREEN_SIMPLE_MSG:
+            self._draw_simple_msg()
+            self._draw_message()
+            return
         if self.screen_state in MENU_SCREENS:
             self._normalize_home()
             self._draw_menu()
@@ -3053,7 +3320,9 @@ class App:
                 time.sleep(2)
             self.remote.q.put("__first_run__")
         threading.Thread(target=_first_run_check, daemon=True).start()
-        if not self.cfg.autoplay_first:
+        if self.cfg.simple_mode:
+            self._simple_set_msg("Starting...")       # simple mode: channel first
+        elif not self.cfg.autoplay_first:
             self._enter_section()      # start on the last used section
         if self.cfg.autoplay_first and self.cfg.playlists \
                 and self.screen_state == SCREEN_PLAYLISTS:
@@ -3088,7 +3357,9 @@ class App:
                 a = self.remote.get(timeout=0)
                 if not a:
                     break
-                if a == "__reload_config__":
+                if a == "__reload_config_now__":
+                    self.reload_config()
+                elif a == "__reload_config__":
                     # settings autosave: don't interrupt what is being watched
                     if self.screen_state == SCREEN_PLAYING or \
                             self.player.is_running():
@@ -3131,7 +3402,8 @@ class App:
                                              SCREEN_POWER, SCREEN_REMOTE):
                         self._open_remote_access()
                 elif a == "__first_run__":
-                    if self.screen_state in (SCREEN_PLAYLISTS, SCREEN_CHANNELS):
+                    if self.screen_state in (SCREEN_PLAYLISTS, SCREEN_CHANNELS,
+                                             SCREEN_SIMPLE_MSG):
                         has_remote = bool(ir.load_learned()) or any(
                             b.get("scancodes") for b in iptv_net.read_keymap())
                         if has_remote:
@@ -3204,6 +3476,8 @@ class App:
                 self._save_movie_position()
                 self._last_saved_pos = time.time()
 
+            if self.cfg.simple_mode:
+                self._simple_tick()
             if iptv_profiles.ACTIVE != self._loaded_profile and \
                     self.screen_state != SCREEN_PLAYING:
                 self._apply_profile()
@@ -3267,10 +3541,25 @@ class App:
                         if now - since > 12:
                             self._idle_since = 0
                             self._idle_tries = getattr(self, "_idle_tries", 0) + 1
-                            if self._idle_tries <= 3:
+                            if self._idle_tries <= (1 if self.cfg.simple_mode
+                                                    else 3):
                                 self.notify("Stream stopped - retrying...", 3)
                                 self._launch(self.current_channel.url, live=True)
                                 self.screen_state = SCREEN_PLAYING
+                            elif self.cfg.simple_mode:
+                                # dead channel: move on to the next one
+                                self._idle_tries = 0
+                                self._simple_fail += 1
+                                if self._simple_fail >= len(self._simple_chans()):
+                                    self._simple_fail = 0
+                                    self._simple_set_msg(
+                                        "No channel is working right now.\n"
+                                        "Trying again in a moment...", retry=30)
+                                else:
+                                    self._simple_start(
+                                        (self.ch_index + 1) %
+                                        len(self._simple_chans()),
+                                        keep_fail=True)
                             else:
                                 self._idle_tries = 0
                                 self.player.stop()
@@ -3282,8 +3571,9 @@ class App:
                         self._idle_since = 0
                         if getattr(self, "_idle_ok_since", 0) == 0:
                             self._idle_ok_since = now
-                        elif now - self._idle_ok_since > 60:
+                        elif now - self._idle_ok_since > 15:
                             self._idle_tries = 0
+                            self._simple_fail = 0
             else:
                 self._idle_since = 0
                 self._idle_ok_since = 0
@@ -3307,6 +3597,8 @@ class App:
                     self.movie_menu = None
                 elif self.current_channel:
                     self.notify("Stream ended", 3)
+                    if self.cfg.simple_mode:
+                        self._simple_hold_until = time.time() + 3
                 self._acquire_display()
                 self.screen_state = (SCREEN_EPISODES if was_series
                                      else SCREEN_CHANNELS)
@@ -3324,6 +3616,7 @@ class App:
                        self.current_playlist.name if self.current_playlist else "",
                        self.show_thumbs, iptv_posters.version,
                        self.section, self.menu_focus, self.live_sel,
+                       self.simple_sel, self.simple_msg, self.cfg.simple_mode,
                        self.menu_prof, iptv_profiles.ACTIVE,
                        iptv_profiles.extra_count(), iptv_profiles.stamp(), self._pin_idx,
                        len(self._pin_buf), self._pin_msg,

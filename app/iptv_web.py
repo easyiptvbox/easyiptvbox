@@ -246,7 +246,7 @@ class ControlServer:
                     return
                 if not self._write_config(text):
                     return
-                outer.q.put("__reload_config__")
+                outer.q.put("__reload_config_now__")     # apply at once
                 self._send(200, {"ok": True})
 
             def _handle_profiles_post(self, path, raw):

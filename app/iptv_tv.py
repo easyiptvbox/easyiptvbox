@@ -148,6 +148,10 @@ class App:
         self._ox = 0               # left offset of the content (menu width)
         self.menu_focus = False    # keyboard focus is in the left menu
         self.menu_prof = None      # highlighted profile row in the menu
+        self._epg_lock = threading.Lock()
+        self._epg_busy = False
+        self._epg_again = False
+        self._epg_sig = None
         self.simple_sel = 0        # simple mode: highlighted tile in the list
         self.simple_msg = ""
         self._simple_pending = None      # channel index waiting for key presses to settle
@@ -265,7 +269,9 @@ class App:
             self._display_active = True
             self._load_fonts()
             self._last_sig = None  # force a fresh redraw
-            self._show_image(SPLASH_BOOT)
+            if not (self.cfg.simple_mode and getattr(self, "_shown_once", False)):
+                self._show_image(SPLASH_BOOT)
+            self._shown_once = True
             return True
         except Exception as e:
             print("Display init failed, staying headless: %s" % e, flush=True)
@@ -412,6 +418,41 @@ class App:
         finally:
             iptv_profiles.set_request(prev)
         return out
+
+    def _schedule_epg_rebuild(self, force=False):
+        """Rebuild the automatic TV-guide mapping in the background.
+
+        Matching every channel against the provider's guide is heavy, so it
+        never runs twice at once: requests that arrive meanwhile are folded
+        into one follow-up run, and a run is skipped when the set of live
+        channels has not changed since the last one."""
+        with self._epg_lock:
+            if self._epg_busy:
+                self._epg_again = True
+                return
+            self._epg_busy = True
+
+        def work():
+            import iptv_epg
+            while True:
+                self._epg_again = False
+                try:
+                    live = self._live_channels_for_epg()
+                    sig = hash(tuple(sorted(live)))
+                    if live and (force or sig != self._epg_sig):
+                        iptv_epg.build_auto_epg(live)
+                        self._epg_sig = sig
+                except Exception as e:
+                    print("EPG rebuild failed: %s" % e, flush=True)
+                try:
+                    self.epg.refresh()
+                except Exception:
+                    pass
+                with self._epg_lock:
+                    if not self._epg_again:
+                        self._epg_busy = False
+                        return
+        threading.Thread(target=work, daemon=True).start()
 
     def start_epg_thread(self):
         EPG_HOURS = 24.0
@@ -748,17 +789,7 @@ class App:
         self._enter_section()
         self._last_sig = None
 
-        def rebuild_epg():          # guide covers every profile's channels
-            try:
-                import iptv_epg
-                live = self._live_channels_for_epg()
-                if live:
-                    iptv_epg.build_auto_epg(live)
-                self.epg.refresh()
-            except Exception as e:
-                print("EPG rebuild after profile switch failed: %s" % e,
-                      flush=True)
-        threading.Thread(target=rebuild_epg, daemon=True).start()
+        self._schedule_epg_rebuild()      # guide covers every profile's channels
 
     PIN_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "<", "0", "OK"]
 
@@ -1765,21 +1796,9 @@ class App:
         self.live_sel = 0
         self._enter_section()
         self.notify("Settings updated", 3)
-        # rebuild the automatic EPG mapping for the (possibly changed) channel
-        # set, then reload the guide - all in the background.
-        def rebuild_epg():
-            try:
-                import iptv_epg
-                live = self._live_channels_for_epg()
-                if live:
-                    iptv_epg.build_auto_epg(live)
-            except Exception as e:
-                print("EPG rebuild after reload failed: %s" % e, flush=True)
-            try:
-                self.epg.refresh()
-            except Exception:
-                pass
-        threading.Thread(target=rebuild_epg, daemon=True).start()
+        # rebuild the automatic EPG mapping only if the channels changed
+        # (single background job, never several at once)
+        self._schedule_epg_rebuild()
 
     def open_playlist(self, idx):
         # Stop any thumbnail scan from the previous category so it doesn't keep

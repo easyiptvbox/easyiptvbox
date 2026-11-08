@@ -1691,6 +1691,7 @@ PAGE = r"""<!DOCTYPE html>
       <h2>Manage profiles</h2>
       <div class="pnote">Each profile has its own Movies, Live and Series categories, theme, text size and
         watch history. The Default profile always exists and the TV starts on it.</div>
+      <div id="profShared" class="pnote"></div>
       <div id="profList"></div>
       <label style="margin-top:.8rem">Add a profile</label>
       <input type="text" id="profNewName" placeholder="Name" maxlength="24" autocomplete="off">
@@ -2269,9 +2270,10 @@ function applySharedLock(){
   const lock=(PROF.id!=='default');
   SHARED_IDS.forEach(id=>{ const e=$(id); if(e) e.disabled=lock; });
   const cur=PROFS.find(p=>p.id===PROF.id);
-  $('profNote').textContent=lock
-    ? 'Editing the profile "'+(cur?cur.name:'')+'": categories, theme and text size. Provider, TV guide and audio sync are shared by the whole box and can only be changed in the Default profile.'
-    : 'Editing the Default profile. Provider, TV guide and audio sync are shared by all profiles.';
+  $('profNote').textContent='';
+  $('profShared').textContent=lock
+    ? 'Provider, TV guide and audio sync are shared by all profiles and can only be changed in the Default profile.'
+    : 'Provider, TV guide and audio sync are shared by all profiles.';
   const b=$('profBadge');
   if(lock&&cur){ b.textContent=cur.name; b.style.display=''; } else b.style.display='none';
 }

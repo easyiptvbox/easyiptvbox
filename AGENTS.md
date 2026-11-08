@@ -63,6 +63,12 @@ Two options:
 - Commit author for this repo: `easyiptvbox <easyiptvbox@proton.me>`.
 - Keep `WHATS_NEW.md` current: add user-visible changes/fixes under the current
   week (newest week on top, keep only the last 10 weeks).
-- Do not change the Pi directly; it updates itself on Mondays or via the app.
+- The Pi updates itself on Mondays or via the app (Settings > Software updates).
+  Pushing changes to the Pi directly is allowed when it helps testing:
+  say what was copied/restarted, remove temporary files afterwards, and avoid
+  restarting the TV service while someone is watching unless needed. Anything
+  tested on the Pi must also be committed and pushed to `main`, so the next
+  update does not undo it. Never touch `config.yaml`, profiles, watch history
+  or secrets on the Pi except for a change the owner asked for.
 - Never commit secrets or device data (provider credentials, `app/cache/`,
   `app/remotes.json`, real `config.yaml`); `.gitignore` covers these.

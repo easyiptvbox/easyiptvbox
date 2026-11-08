@@ -187,8 +187,9 @@ watch history. Provider login, TV guide, audio sync, remotes, Wi-Fi and updates 
   A profile with a PIN (lock icon) asks for it first. A new browser session starts on Default again.</li>
  <li><b>Settings &gt; Manage profiles</b>: add a profile (name, optional PIN of 4 to 6 digits, and start empty or copy another
   profile: categories, theme and live pictures are copied, watch history is not), rename, change the PIN, add a picture, delete.</li>
- <li>On the TV, once you have created a profile, the left menu lists the profiles above the QR code. Select one and press OK;
-  a protected profile asks for its PIN with the arrows and OK.</li>
+ <li>On the TV, once you have created a profile, the left menu shows the <b>current profile</b> (picture and name) above the QR code.
+  Select it and press OK to get a list of all profiles; pick one with the arrows and OK (Back returns). A protected profile
+  asks for its PIN with the arrows and OK.</li>
  <li><b>Play on TV</b> from the web app switches the TV to the profile you are using in the web app.</li>
 </ul>
 <p class="tip">A protected profile cannot be opened, edited or played from the TV or from the web app without its PIN

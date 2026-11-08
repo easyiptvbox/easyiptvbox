@@ -102,7 +102,8 @@ the changes per week (also linked from Settings).
      list of live channels; every remote button switches channel (Left = previous,
      all others = next, except volume/mute). Applied only after pressing Apply.
    - **Profiles**: with extra profiles created (Settings > Manage profiles) the menu lists
-     them above the QR code; PIN-protected profiles ask for a PIN on the TV.
+     the current profile above the QR code; OK on it opens a list to switch
+     profile, and PIN-protected profiles ask for a PIN on the TV.
    - **Movies / Series**: a **poster grid** (pictures supplied by your
      provider, cached in `app/cache/posters`; items without a picture
      show their title).

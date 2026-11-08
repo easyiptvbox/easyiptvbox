@@ -128,6 +128,7 @@ SCREEN_WIFI_LIST = "wifi_list"      # pick a Wi-Fi network
 SCREEN_WIFI_KEYBOARD = "wifi_kbd"   # on-screen keyboard for the password
 SCREEN_WIFI_CONNECT = "wifi_connect"  # connecting / result
 SCREEN_SIMPLE_MSG = "simple_msg"    # simple mode: status text (waiting / no channel works)
+SCREEN_PROFILES = "profiles"  # list of profiles to switch between
 SCREEN_PIN = "pin"           # numeric PIN pad to open a protected profile
 
 
@@ -145,7 +146,8 @@ class App:
         self.pl_index = 0          # selected playlist
         self._ox = 0               # left offset of the content (menu width)
         self.menu_focus = False    # keyboard focus is in the left menu
-        self.menu_prof = None      # highlighted profile row in the menu
+        self.menu_prof = None      # 0 = the profile row in the menu is highlighted
+        self.prof_sel = 0          # selected row in the profile list
         self._epg_lock = threading.Lock()
         self._epg_busy = False
         self._epg_again = False
@@ -601,6 +603,9 @@ class App:
         if self.screen_state == SCREEN_PIN:
             self._act_pin(a)
             return
+        if self.screen_state == SCREEN_PROFILES:
+            self._act_profiles(a)
+            return
         if self.screen_state in MENU_SCREENS:
             self._normalize_home()
             if self.menu_focus:
@@ -706,40 +711,68 @@ class App:
             self._enter_section()
 
     def _menu_profiles(self):
-        """Profiles shown above the QR code (only once an extra exists)."""
+        """Profiles to choose from (only once an extra profile exists)."""
         if iptv_profiles.extra_count() <= 0:
             return []
         return iptv_profiles.list_profiles()
 
     def _act_menu(self, a):
-        profs = self._menu_profiles()
-        if self.menu_prof is not None and self.menu_prof >= len(profs):
+        has_prof = bool(self._menu_profiles())
+        if self.menu_prof is not None and not has_prof:
             self.menu_prof = None
         ns = len(SECTIONS)
         if a in (ir.UP, ir.DOWN):
-            pos = (ns + self.menu_prof) if self.menu_prof is not None \
+            pos = ns if self.menu_prof is not None \
                 else SECTIONS.index(self.section)
-            pos = (pos + (1 if a == ir.DOWN else -1)) % (ns + len(profs))
+            pos = (pos + (1 if a == ir.DOWN else -1)) % (ns + (1 if has_prof else 0))
             if pos < ns:
                 self.menu_prof = None
                 self.section = SECTIONS[pos]
                 self._save_ui_state()
                 self._enter_section()
             else:
-                self.menu_prof = pos - ns       # highlight only; OK switches
+                self.menu_prof = 0              # the profile row; OK opens the list
         elif a == ir.OK and self.menu_prof is not None:
-            self._pick_profile(profs[self.menu_prof])
+            self._open_profile_list()
         elif a in (ir.OK, ir.RIGHT):
             self.menu_prof = None
             self.menu_focus = False
         elif a in (ir.BACK, ir.MENU, ir.HOME):
             self.open_power_menu()
 
+    def _open_profile_list(self):
+        profs = self._menu_profiles()
+        if not profs:
+            return
+        self.prof_sel = next((i for i, p in enumerate(profs)
+                              if p["id"] == iptv_profiles.ACTIVE), 0)
+        self.screen_state = SCREEN_PROFILES
+        self._last_sig = None
+
+    def _act_profiles(self, a):
+        profs = self._menu_profiles()
+        n = len(profs)
+        if not n:
+            self.screen_state = SCREEN_PLAYLISTS
+            self._enter_section()
+            return
+        self.prof_sel = min(self.prof_sel, n - 1)
+        if a == ir.UP:
+            self.prof_sel = (self.prof_sel - 1) % n
+        elif a == ir.DOWN:
+            self.prof_sel = (self.prof_sel + 1) % n
+        elif a == ir.OK:
+            self._pick_profile(profs[self.prof_sel])
+        elif a in (ir.BACK, ir.LEFT, ir.MENU, ir.HOME):
+            self.menu_prof = None
+            self._enter_section()
+
     # -- profiles ------------------------------------------------------------
     def _pick_profile(self, p):
         if p["id"] == iptv_profiles.ACTIVE:
             self.menu_prof = None
             self.notify("Already using %s" % p["name"], 2)
+            self._enter_section()
             return
         if p["has_pin"]:
             self._pin_target = p
@@ -801,8 +834,8 @@ class App:
         elif a == ir.RIGHT and i % 3 < 2:
             self._pin_idx = i + 1
         elif a == ir.BACK:
-            self.screen_state = SCREEN_PLAYLISTS
-            self._enter_section()
+            self.screen_state = SCREEN_PROFILES
+            self._last_sig = None
         elif a == ir.OK:
             k = self.PIN_KEYS[i]
             self._pin_msg = ""
@@ -2267,6 +2300,8 @@ class App:
             self._draw_wifi_list()
         elif self.screen_state == SCREEN_WIFI_KEYBOARD:
             self._draw_wifi_keyboard()
+        elif self.screen_state == SCREEN_PROFILES:
+            self._draw_profile_list()
         elif self.screen_state == SCREEN_PIN:
             self._draw_pin()
         elif self.screen_state == SCREEN_WIFI_CONNECT:
@@ -2911,45 +2946,57 @@ class App:
         self.surface.blit(hit[1], (cx - r, cy - r))
 
     def _draw_menu_profiles(self, pad, mw, top, bottom):
-        """Profiles in the menu, just above the QR code (a few rows; the list
-        scrolls when there are more)."""
+        """One row just above the QR code: the current profile (picture and
+        name). Select it and press OK to choose another profile."""
         profs = self._menu_profiles()
-        if not profs or bottom - top < 40:
+        if not profs:
             return
-        ph = int(self.H * 0.07)
-        vis = max(1, min(len(profs), (bottom - top) // ph))
+        act = next((p for p in profs if p["id"] == iptv_profiles.ACTIVE),
+                   profs[0])
+        ph = int(self.H * 0.105)
+        y = bottom - ph
+        focus = self.menu_focus and self.menu_prof is not None
+        rect = (pad, y, mw - 2 * pad, ph - 6)
+        pygame.draw.rect(self.surface, SELECT if focus else PANEL, rect,
+                         border_radius=12)
+        r = (ph - 6) // 2 - 6
+        self._draw_avatar(pad + 20 + r, y + (ph - 6) // 2, r, act)
+        cap = self._fit(self.f_hint, "Profile", SELECT_TEXT if focus else DIM,
+                        mw - 2 * pad - 2 * r - 52)
+        nm = self._fit(self.f_small, act["name"],
+                       SELECT_TEXT if focus else TEXT, mw - 2 * pad - 2 * r - 52)
+        tx = pad + 30 + 2 * r
+        gap = (ph - 6 - cap.get_height() - nm.get_height()) // 2
+        self.surface.blit(cap, (tx, y + max(2, gap)))
+        self.surface.blit(nm, (tx, y + max(2, gap) + cap.get_height()))
+
+    def _draw_profile_list(self):
+        """Full-screen list of profiles to switch between."""
+        profs = self._menu_profiles()
+        self._draw_header("Choose a profile")
+        top = int(self.H * 0.18)
+        row_h = int(self.H * 0.11)
+        visible = max(1, int((self.H * 0.7) // row_h))
+        sel = min(self.prof_sel, max(0, len(profs) - 1))
+        start = max(0, min(sel - visible // 2, max(0, len(profs) - visible)))
+        left = int(self.W * 0.06)
+        w = int(self.W * 0.88)
         act = iptv_profiles.ACTIVE
-        sel = self.menu_prof if self.menu_prof is not None else next(
-            (i for i, p in enumerate(profs) if p["id"] == act), 0)
-        start = max(0, min(sel - vis // 2, len(profs) - vis))
-        y = bottom - vis * ph          # stick to the QR code
-        for i in range(start, start + vis):
+        for row, i in enumerate(range(start, min(start + visible, len(profs)))):
             p = profs[i]
-            focus = self.menu_focus and self.menu_prof == i
-            rect = (pad, y, mw - 2 * pad, ph - 6)
-            if focus:
-                pygame.draw.rect(self.surface, SELECT, rect, border_radius=12)
-            elif p["id"] == act:
-                pygame.draw.rect(self.surface, PANEL, rect, border_radius=12)
-                pygame.draw.rect(self.surface, SELECT,
-                                 (pad, y + 8, 6, ph - 22), border_radius=3)
-            r = (ph - 6) // 2 - 6
-            self._draw_avatar(pad + 20 + r, y + (ph - 6) // 2, r, p)
-            nm = p["name"] + (" *" if p["has_pin"] else "")
-            tcol = SELECT_TEXT if focus else (TEXT if p["id"] == act else DIM)
-            s = self._fit(self.f_hint, nm, tcol, mw - 2 * pad - 2 * r - 52)
-            self.surface.blit(s, (pad + 30 + 2 * r,
-                                  y + (ph - 6) // 2 - s.get_height() // 2))
-            y += ph
-        # scroll hints
-        ax = mw - pad - 14
-        if start > 0:
-            pygame.draw.polygon(self.surface, DIM, [(ax - 6, bottom - vis * ph + 12),
-                                (ax + 6, bottom - vis * ph + 12),
-                                (ax, bottom - vis * ph + 4)])
-        if start + vis < len(profs):
-            pygame.draw.polygon(self.surface, DIM, [(ax - 6, bottom - 12),
-                                (ax + 6, bottom - 12), (ax, bottom - 4)])
+            y = top + row * row_h
+            is_sel = (i == sel)
+            pygame.draw.rect(self.surface, SELECT if is_sel else PANEL,
+                             (left, y, w, row_h - 12), border_radius=14)
+            r = (row_h - 12) // 2 - 8
+            self._draw_avatar(left + 24 + r, y + (row_h - 12) // 2, r, p)
+            tcol = SELECT_TEXT if is_sel else TEXT
+            label = p["name"] + ("   (in use)" if p["id"] == act else "") \
+                + ("   PIN" if p["has_pin"] else "")
+            s = self._fit(self.f_item, label, tcol, w - 2 * r - 90)
+            self.surface.blit(s, (left + 48 + 2 * r,
+                                  y + (row_h - 12) // 2 - s.get_height() // 2))
+        self._draw_hint("OK to switch  -  Back to return")
 
     def _draw_pin(self):
         p = self._pin_target or {"id": "", "name": "", "has_pic": False}
@@ -3584,7 +3631,7 @@ class App:
                        self.show_thumbs, iptv_posters.version,
                        self.section, self.menu_focus, self.live_sel,
                        self.simple_msg, self.cfg.simple_mode,
-                       self.menu_prof, iptv_profiles.ACTIVE,
+                       self.menu_prof, self.prof_sel, iptv_profiles.ACTIVE,
                        iptv_profiles.extra_count(), iptv_profiles.stamp(), self._pin_idx,
                        len(self._pin_buf), self._pin_msg,
                        iptv_livepics.dir_stamp(),

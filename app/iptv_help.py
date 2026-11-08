@@ -148,13 +148,15 @@ straight on a channel, with no menus.</p>
 <ul>
  <li>Choose the channels yourself: add them from your live categories and put them in the order you like (the arrows
   move a channel up or down). Channels from several categories can be mixed.</li>
- <li>On the TV the <b>arrow buttons</b> switch to the previous / next channel. A banner shows the number and name
-  (and what is on now, if the TV guide has it). Press the arrows several times quickly and only the last channel opens.</li>
- <li><b>OK</b> shows the chosen channels as a list; pick one with the arrows and OK, or press Back to keep watching.</li>
+ <li>Your changes in the card are <b>not used until you press Apply</b>. When you turn simple mode on, a warning explains
+  what will change and how to get the normal menus back. <b>Discard changes</b> throws away what you have not applied.</li>
+ <li>On the TV <b>every button switches channel</b>: <b>Left</b> goes to the previous channel, <b>all other buttons</b> go to the
+  next one. Only <b>volume and mute</b> work as usual. A banner shows the number and name (and what is on now, if the TV guide
+  has it). Press several times quickly and only the last channel opens.</li>
  <li>After a restart the box continues on the channel that was playing last.</li>
- <li><b>Back, Home and Menu do nothing.</b> The power button still opens the Standby / Power off prompt, Wi-Fi setup and so on.</li>
+ <li>The <b>power button</b> still opens the Standby / Power off prompt, Wi-Fi setup and so on.</li>
  <li>A channel that does not work is retried and then skipped, so the picture never stays black for long.</li>
- <li>To leave simple mode, turn it off here in the web app (it applies at once). It is a setting of the whole box,
+ <li>To leave simple mode, untick it here in the web app and press <b>Apply</b> (it applies at once). It is a setting of the whole box,
   so it is changed in the Default profile and ignores other profiles. You can also set <code>simple_mode: enabled: false</code>
   in config.yaml.</li>
 </ul>

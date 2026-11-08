@@ -1568,12 +1568,12 @@ PAGE = r"""<!DOCTYPE html>
     <div class="card" id="smCard">
       <h2><a class="hl" href="/help#simple" target="_blank" rel="noopener">Simple mode <span class="hi">?</span></a></h2>
       <div class="pnote" style="margin-top:0">For someone who just wants to watch TV: the box starts straight on a channel,
-        the arrow buttons switch between the channels below, and OK shows them as a list.
-        Back, Home and Menu do nothing. Turn this off here to get the normal menus back.
-        This setting is shared by the whole box.</div>
+        and every button on the remote (except volume and mute) switches channel: Left goes to the previous one,
+        all other buttons to the next. The menus are not available on the TV. This setting is shared by the whole box.
+        <b>Your changes here are only used after you press &ldquo;Apply&rdquo;.</b></div>
       <label style="display:flex;gap:.6rem;align-items:center;margin-top:.7rem;cursor:pointer">
         <input type="checkbox" id="smOn" style="width:auto;margin:0">
-        <span>Simple mode is on</span>
+        <span>Use simple mode</span>
       </label>
       <label>Channels in the list (in this order)</label>
       <div id="smList"></div>
@@ -1581,6 +1581,11 @@ PAGE = r"""<!DOCTYPE html>
       <select id="smCat"></select>
       <input type="text" id="smFilter" placeholder="Filter by name" style="margin-top:.4rem" autocomplete="off">
       <div id="smResults" style="margin-top:.4rem"></div>
+      <div id="smState" class="pnote" style="margin-top:.8rem"></div>
+      <div style="display:flex;gap:.5rem;margin-top:.4rem">
+        <button class="save" id="smApply" style="flex:2" disabled>Apply</button>
+        <button class="ghost" id="smDiscard" style="flex:1" disabled>Discard changes</button>
+      </div>
       <div id="smMsg" class="pnote" style="min-height:1.2em"></div>
     </div>
 
@@ -2347,25 +2352,42 @@ $('profCreate').onclick=async()=>{
 // ---- Simple mode ----
 let SM={enabled:false,channels:[],editable:true}, SMCAT=[];
 function smMsg(ok,t){ const m=$('smMsg'); m.textContent=t; m.style.color=ok?'var(--oktx)':'var(--errtx)'; }
-let SM_BUSY=false, SM_DIRTY=false;
-async function smSave(){
-  if(SM_BUSY){ SM_DIRTY=true; return; }        // saves go one at a time, newest state last
-  SM_BUSY=true;
+let SM_SAVED=null;                       // what the box has now (JSON), to detect changes
+const smSnap=()=>JSON.stringify({e:SM.enabled,c:SM.channels.map(c=>c.id)});
+function smChanged(){ return SM_SAVED!==null && smSnap()!==SM_SAVED; }
+async function smApply(){
+  if(!smChanged()) return;
+  if(SM.enabled&&!SM.channels.length){ smMsg(false,'Add at least one channel before turning simple mode on.'); return; }
+  if(SM.enabled){
+    const addr=location.origin;
+    const ok=confirm('Turn on SIMPLE MODE?\n\n'
+      +'After you press OK the TV starts directly on the first channel and every button on the remote (except volume and mute) switches channel. The menus are no longer available on the TV.\n\n'
+      +'HOW TO GET THE NORMAL MENUS BACK:\n'
+      +'1. On a phone or computer on the same network, open '+addr+'\n'
+      +'2. Go to Settings > Simple mode (open the card)\n'
+      +'3. Untick \"Use simple mode\" and press Apply.\n'
+      +'(Or set "simple_mode: enabled: false" in config.yaml on the box.)\n\n'
+      +'Write the address down before you continue. Apply simple mode now?');
+    if(!ok) return;
+  }
+  const btn=$('smApply'); btn.disabled=true; smMsg(true,'Applying\u2026');
   try{
-    do{
-      SM_DIRTY=false;
-      const r=await fetch('/api/simple/set',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({enabled:SM.enabled,ids:SM.channels.map(c=>c.id)})});
-      const j=await r.json().catch(()=>({}));
-      if(r.ok){ smMsg(true,'Saved'); setTimeout(()=>{ if($('smMsg').textContent==='Saved') smMsg(true,''); },2500); }
-      else{ SM_DIRTY=false; smMsg(false,j.error||'Could not save'); await loadSimple(true); break; }
-    }while(SM_DIRTY);
+    const r=await fetch('/api/simple/set',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({enabled:SM.enabled,ids:SM.channels.map(c=>c.id)})});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok){ SM_SAVED=smSnap(); smMsg(true,SM.enabled?'Applied. The TV is now in simple mode.':'Applied. Simple mode is off.'); }
+    else smMsg(false,j.error||'Could not apply');
   }catch(e){ smMsg(false,'Could not reach the box'); }
-  SM_BUSY=false;
+  smRender();
 }
 function smRender(){
   const ed=SM.editable;
   $('smOn').checked=SM.enabled; $('smOn').disabled=!ed;
+  const ch=smChanged();
+  $('smApply').disabled=!ed||!ch; $('smDiscard').disabled=!ed||!ch;
+  const live=SM_SAVED?JSON.parse(SM_SAVED):null;
+  $('smState').textContent=!ed?'':(ch?'You have changes that are not applied yet. The TV is not affected until you press Apply.':(live&&live.e?'Simple mode is ON on the TV.':'Simple mode is off.'));
+  $('smState').style.color=ch?'var(--errtx)':'';
   ['smCat','smFilter'].forEach(id=>$(id).disabled=!ed);
   const list=$('smList'); list.innerHTML='';
   SM.channels.forEach((c,i)=>{
@@ -2375,9 +2397,9 @@ function smRender(){
     row.appendChild(n); row.appendChild(nm);
     const mk=(t,fn,dis)=>{ const b=document.createElement('button'); b.className='ghost'; b.type='button'; b.textContent=t;
       b.style.cssText='flex:0 0 auto;padding:.25rem .55rem'; b.disabled=!ed||!!dis; b.onclick=fn; row.appendChild(b); };
-    mk('\u2191',()=>{ [SM.channels[i-1],SM.channels[i]]=[SM.channels[i],SM.channels[i-1]]; smRender(); smSave(); },i===0);
-    mk('\u2193',()=>{ [SM.channels[i+1],SM.channels[i]]=[SM.channels[i],SM.channels[i+1]]; smRender(); smSave(); },i===SM.channels.length-1);
-    mk('\u2715',()=>{ SM.channels.splice(i,1); if(!SM.channels.length) SM.enabled=false; smRender(); smSave(); });
+    mk('\u2191',()=>{ [SM.channels[i-1],SM.channels[i]]=[SM.channels[i],SM.channels[i-1]]; smRender(); },i===0);
+    mk('\u2193',()=>{ [SM.channels[i+1],SM.channels[i]]=[SM.channels[i],SM.channels[i+1]]; smRender(); },i===SM.channels.length-1);
+    mk('\u2715',()=>{ SM.channels.splice(i,1); if(!SM.channels.length) SM.enabled=false; smRender(); });
     list.appendChild(row);
   });
   if(!SM.channels.length) list.innerHTML='<div style="color:var(--dim)">No channels yet. Add some below.</div>';
@@ -2391,7 +2413,7 @@ function smRender(){
     const nm=document.createElement('div'); nm.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; nm.textContent=c.name;
     const b=document.createElement('button'); b.className='ghost'; b.type='button'; b.style.cssText='flex:0 0 auto;padding:.25rem .7rem';
     if(have.has(c.id)){ b.textContent='\u2713 added'; b.disabled=true; }
-    else{ b.textContent='Add'; b.disabled=!ed; b.onclick=()=>{ SM.channels.push({id:c.id,name:c.name}); smRender(); smSave(); }; }
+    else{ b.textContent='Add'; b.disabled=!ed; b.onclick=()=>{ SM.channels.push({id:c.id,name:c.name}); smRender(); }; }
     row.appendChild(nm); row.appendChild(b); res.appendChild(row);
   });
   if(hits.length>60){ const m=document.createElement('div'); m.className='pnote'; m.textContent='Showing 60 of '+hits.length+' - type in the filter to narrow it down.'; res.appendChild(m); }
@@ -2401,6 +2423,7 @@ function smRender(){
 async function loadSimple(keepFilter){
   try{
     SM=await (await fetch('/api/simple')).json();
+    SM_SAVED=smSnap();
     const c=await (await fetch('/api/play/catalog')).json();
     SMCAT=c.live||[];
   }catch(e){ return; }
@@ -2410,7 +2433,9 @@ async function loadSimple(keepFilter){
   if(!keepFilter) $('smFilter').value='';
   smRender();
 }
-$('smOn').onchange=()=>{ SM.enabled=$('smOn').checked; smSave(); };
+$('smOn').onchange=()=>{ SM.enabled=$('smOn').checked; smRender(); };
+$('smApply').onclick=smApply;
+$('smDiscard').onclick=()=>loadSimple(true);
 $('smCat').onchange=()=>{ $('smFilter').value=''; smRender(); };
 $('smFilter').oninput=smRender;
 

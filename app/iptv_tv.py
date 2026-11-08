@@ -38,7 +38,6 @@ import iptv_stream
 # screens that must never be seen in simple mode: it falls back to the channel
 SIMPLE_FALLBACK = ("playlists", "channels", "series", "seasons", "episodes",
                    "loading", "resume")
-SIMPLE_COLS = 4
 MENU_SCREENS = ("playlists", "channels", "series")   # screens with the left menu
 SECTIONS = ("movies", "live", "series")
 SECTION_LABELS = {"live": "Live", "movies": "Movies", "series": "Series"}
@@ -128,7 +127,6 @@ SCREEN_LEARN = "learn"       # IR remote learning wizard
 SCREEN_WIFI_LIST = "wifi_list"      # pick a Wi-Fi network
 SCREEN_WIFI_KEYBOARD = "wifi_kbd"   # on-screen keyboard for the password
 SCREEN_WIFI_CONNECT = "wifi_connect"  # connecting / result
-SCREEN_SIMPLE = "simple_list"      # simple mode: pick one of the chosen channels
 SCREEN_SIMPLE_MSG = "simple_msg"    # simple mode: status text (waiting / no channel works)
 SCREEN_PIN = "pin"           # numeric PIN pad to open a protected profile
 
@@ -152,7 +150,6 @@ class App:
         self._epg_busy = False
         self._epg_again = False
         self._epg_sig = None
-        self.simple_sel = 0        # simple mode: highlighted tile in the list
         self.simple_msg = ""
         self._simple_pending = None      # channel index waiting for key presses to settle
         self._simple_apply_at = 0.0
@@ -590,7 +587,7 @@ class App:
         if a == "mute":
             self.player.toggle_mute(); self.notify("Mute"); return
         if self.cfg.simple_mode and self.screen_state in (
-                SCREEN_PLAYING, SCREEN_SIMPLE, SCREEN_SIMPLE_MSG):
+                SCREEN_PLAYING, SCREEN_SIMPLE_MSG):
             self._act_simple(a)
             return
         if self.screen_state == SCREEN_REMOTE:
@@ -1842,10 +1839,6 @@ class App:
     def _simple_chans(self):
         return self.cfg.simple_channels
 
-    def _simple_cols(self):
-        """Bigger tiles when the list is short."""
-        return 3 if len(self._simple_chans()) <= 6 else SIMPLE_COLS
-
     def _simple_last_index(self):
         last = self._ui_state_read().get("simple_last")
         for i, c in enumerate(self._simple_chans()):
@@ -1939,41 +1932,14 @@ class App:
         if self.screen_state == SCREEN_PLAYING:
             self._simple_banner(self._simple_pending, hold=3.0)
 
-    def _simple_open_list(self):
-        chans = self._simple_chans()
-        self.thumbs.stop()
-        self.player.stop()
-        self._acquire_display()
-        self.simple_sel = self.ch_index % max(1, len(chans))
-        self._simple_pending = None
-        self.screen_state = SCREEN_SIMPLE
-        self._last_sig = None
-        self.thumbs.start([c.url for c in chans])    # pictures for the tiles
-
     def _act_simple(self, a):
-        chans = self._simple_chans()
-        n = len(chans)
-        if not n:
+        """Simple mode: Left = previous channel; every other button (except
+        volume / mute, handled before, and Power) = next channel."""
+        if not self._simple_chans():
             return
-        if self.screen_state == SCREEN_SIMPLE:
-            r = self._poster_nav(a, self.simple_sel, n, cols=self._simple_cols())
-            if r == "ok":
-                self.thumbs.stop()
-                self._simple_start(self.simple_sel)
-            elif r is None:
-                if a == ir.BACK:                  # close the list, keep watching
-                    self.thumbs.stop()
-                    self._simple_start(self.ch_index)
-            else:
-                self.simple_sel = r
-            return
-        if a in (ir.UP, ir.LEFT):
-            self._simple_step(-1)
-        elif a in (ir.DOWN, ir.RIGHT):
-            self._simple_step(1)
-        elif a == ir.OK and self.screen_state == SCREEN_PLAYING:
-            self._simple_open_list()
-        # Back / Home / Menu do nothing: the box stays in simple mode
+        if self.screen_state != SCREEN_PLAYING:
+            return                     # message screen: nothing to switch yet
+        self._simple_step(-1 if a == ir.LEFT else 1)
 
     def _simple_tick(self):
         """Called every main-loop pass while simple mode is on."""
@@ -2021,20 +1987,6 @@ class App:
                     auto=True)
         else:
             self._simple_menu_since = 0.0
-
-    def _draw_simple_channels(self):
-        chans = self._simple_chans()
-
-        def get(k):
-            c = chans[k]
-            pic = iptv_livepics.find(iptv_livepics.chan_key(c.url))
-            if not pic and iptv_thumbs.has_thumb(c.url):
-                pic = iptv_thumbs.thumb_path(c.url)
-            return (c.name, pic or "", False)
-        self._draw_poster_grid("Choose a channel", len(chans), get,
-                               self.simple_sel, "", cols=self._simple_cols(),
-                               rows=2 if self._simple_cols() == 3 else 3,
-                               aspect=16 / 9, colored=True, cover=True)
 
     def _draw_simple_msg(self, text=None):
         lines = (text or self.simple_msg or "").split("\n")
@@ -2260,10 +2212,6 @@ class App:
         self._ox = 0
         if self.cfg.simple_mode and self.screen_state in SIMPLE_FALLBACK:
             self._draw_simple_msg("Starting...")      # never show the menus
-            self._draw_message()
-            return
-        if self.screen_state == SCREEN_SIMPLE:
-            self._draw_simple_channels()
             self._draw_message()
             return
         if self.screen_state == SCREEN_SIMPLE_MSG:
@@ -3635,7 +3583,7 @@ class App:
                        self.current_playlist.name if self.current_playlist else "",
                        self.show_thumbs, iptv_posters.version,
                        self.section, self.menu_focus, self.live_sel,
-                       self.simple_sel, self.simple_msg, self.cfg.simple_mode,
+                       self.simple_msg, self.cfg.simple_mode,
                        self.menu_prof, iptv_profiles.ACTIVE,
                        iptv_profiles.extra_count(), iptv_profiles.stamp(), self._pin_idx,
                        len(self._pin_buf), self._pin_msg,

@@ -99,7 +99,8 @@ the changes per week (also linked from Settings).
      *Settings > Live thumbnails*, else the grabbed frame (Menu key to
      refresh), else a colored square.
    - **Simple mode** (Settings > Simple mode): the box boots straight into a chosen
-     list of live channels; the arrow buttons switch channel and OK shows the list.
+     list of live channels; every remote button switches channel (Left = previous,
+     all others = next, except volume/mute). Applied only after pressing Apply.
    - **Profiles**: with extra profiles created (Settings > Manage profiles) the menu lists
      them above the QR code; PIN-protected profiles ask for a PIN on the TV.
    - **Movies / Series**: a **poster grid** (pictures supplied by your

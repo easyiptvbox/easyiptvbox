@@ -25,6 +25,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - Movies can be streamed to your phone/computer (Safari player, VLC, download).
 
 **Changed**
+- The cards in the web app's Play tab (Movies, Live TV, Series) now start collapsed: tap a title to open or close it, or use Open all / Close all. Your choices are remembered in the browser, and starting something from a card opens that card (issue #6).
 - Settings: the note "Provider, TV guide and audio sync are shared by all profiles." now sits in the Manage profiles card instead of under the profile selector (issue #5).
 - TV menu: the profiles are no longer listed above the QR code. Only the current profile's picture and name is shown there; select it and press OK to open a list of profiles to switch between.
 - The cards on the web app's Settings page are now **collapsed by default**: tap a title to open or close it, or use Open all / Close all. Your choices are remembered in the browser. The Profile selector always stays open. (Thanks for the suggestion, issue #2.)

@@ -1403,6 +1403,11 @@ PAGE = r"""<!DOCTYPE html>
   #config .card.collapsed > h2 { margin-bottom:0; }
   #config .card.collapsed > h2::after { transform:rotate(-90deg); }
   #config .card.collapsed > :not(h2) { display:none !important; }
+  #play .card.pcol > h2 { cursor:pointer; display:flex; align-items:center; justify-content:space-between; user-select:none; margin-bottom:.4rem; }
+  #play .card.pcol > h2::after { content:'\25BE'; color:var(--dim); font-size:1rem; margin-left:.6rem; transition:transform .15s; }
+  #play .card.pcol.collapsed > h2 { margin-bottom:0; }
+  #play .card.pcol.collapsed > h2::after { transform:rotate(-90deg); }
+  #play .card.pcol.collapsed > :not(h2) { display:none !important; }
   .cfgbar { display:flex; gap:.6rem; margin:1rem 0; position:sticky; bottom:0;
             background:var(--bg); padding:.6rem 0; }
   .save { background:var(--accent2); color:#06210f; border:none; padding:.8rem 1.2rem;
@@ -1501,9 +1506,13 @@ PAGE = r"""<!DOCTYPE html>
       <div class="pnote">Playing here stops the TV, and the TV shows
         "Busy" until you stop.</div>
     </div>
-    <div class="card"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Movies <span class="hi">?</span></a></h2><div id="pmovies"></div></div>
-    <div class="card"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Live TV <span class="hi">?</span></a></h2><div id="plive">Loading&hellip;</div></div>
-    <div class="card"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Series <span class="hi">?</span></a></h2><div id="pseries"></div><div id="peps"></div></div>
+    <div style="display:flex;gap:.5rem;margin:0 0 .6rem">
+      <button class="ghost" id="playOpen" style="flex:1;padding:.4rem">Open all</button>
+      <button class="ghost" id="playClose" style="flex:1;padding:.4rem">Close all</button>
+    </div>
+    <div class="card pcol" id="pMoviesCard"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Movies <span class="hi">?</span></a></h2><div id="pmovies"></div></div>
+    <div class="card pcol" id="pLiveCard"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Live TV <span class="hi">?</span></a></h2><div id="plive">Loading&hellip;</div></div>
+    <div class="card pcol" id="pSeriesCard"><h2><a class="hl" href="/help#play" target="_blank" rel="noopener">Series <span class="hi">?</span></a></h2><div id="pseries"></div><div id="peps"></div></div>
   </section>
 
   <section id="config">
@@ -2234,6 +2243,23 @@ $('wifiSetupBtn').onclick=async()=>{
 };
 loadRemotes();
 
+// ---- Collapsible Play cards (closed by default, choice remembered) ----
+const PCARDS=['pMoviesCard','pLiveCard','pSeriesCard'];
+(function(){
+  let open={}; try{ open=JSON.parse(localStorage.getItem('openPlay')||'{}'); }catch(e){}
+  const save=()=>{ const o={}; PCARDS.forEach(id=>{ if(!$(id).classList.contains('collapsed')) o[id]=1; }); try{ localStorage.setItem('openPlay',JSON.stringify(o)); }catch(e){} };
+  PCARDS.forEach(id=>{
+    const c=$(id); if(!open[id]) c.classList.add('collapsed');
+    c.querySelector(':scope > h2').addEventListener('click',e=>{ if(e.target.closest('a')) return; c.classList.toggle('collapsed'); save(); });
+  });
+  $('playOpen').onclick=()=>{ PCARDS.forEach(id=>$(id).classList.remove('collapsed')); save(); };
+  $('playClose').onclick=()=>{ PCARDS.forEach(id=>$(id).classList.add('collapsed')); save(); };
+})();
+function openPlayCard(kind){
+  const id=kind==='live'?'pLiveCard':kind==='movie'?'pMoviesCard':'pSeriesCard';
+  $(id).classList.remove('collapsed');
+}
+
 // ---- Collapsible Settings cards (closed by default, choice remembered) ----
 (function(){
   const cards=[...document.querySelectorAll('#config .card')].filter(c=>c.querySelector(':scope > h2'));
@@ -2756,6 +2782,7 @@ async function loadEpisodes(sid){
 }
 let PCUR=null;
 function playItem(kind,id,name,ext){
+  openPlayCard(kind);
   stopPlayer();
   const v=$('pv'), st=$('pst');
   const src=location.origin+'/stream/'+kind+'/'+id+'.'+(ext||'ts');

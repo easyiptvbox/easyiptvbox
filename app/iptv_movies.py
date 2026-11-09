@@ -124,7 +124,10 @@ class MovieState:
 
     @property
     def subs_on(self):
-        return bool(self._data["prefs"].get("subs_on", False))
+        """Subtitles are used whenever a preferred language is saved. The old
+        saved on/off flag is ignored: choosing "Off" now only affects the
+        video being watched."""
+        return bool(self.sub_langs)
 
     def set_audio_lang(self, lang):
         """A chosen audio language moves to the top of the history (max 8)."""
@@ -138,13 +141,14 @@ class MovieState:
             _save(self._data)
 
     def set_sub_pref(self, lang, on):
-        """Turn subtitles on/off; a chosen language moves to the top of the
-        history (max 8 kept)."""
+        """A chosen subtitle language moves to the top of the history (max 8
+        kept). Choosing Off (on=False) changes nothing that is saved."""
+        if not (on and lang):
+            return
         p = self._data["prefs"]
-        if on and lang:
-            lst = [l for l in self.sub_langs if l != lang]
-            p["sub_langs"] = ([lang] + lst)[:8]
-            p["sub_lang"] = lang
-        p["subs_on"] = bool(on)
+        lst = [l for l in self.sub_langs if l != lang]
+        p["sub_langs"] = ([lang] + lst)[:8]
+        p["sub_lang"] = lang
+        p["subs_on"] = True
         with _lock:
             _save(self._data)

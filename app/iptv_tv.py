@@ -2168,6 +2168,7 @@ class App:
     def _launch(self, url, **kwargs):
         """Show a loading screen, release DRM, then start mpv."""
         self._crop_done = False
+        self._subname_done = False
         # Apply the configured live-TV audio-sync offset (seconds) to live
         # streams only. Movies/series keep the stream's own timing.
         if kwargs.get("live") and "audio_delay" not in kwargs:
@@ -3529,6 +3530,27 @@ class App:
                                 self.notify("Recovering playback...", 2)
                                 self._launch(self.current_channel.url, live=True)
                                 self.screen_state = SCREEN_PLAYING
+
+            # movies / episodes: subtitles by track name when the language code
+            # does not match (once per video, after the tracks are known)
+            if (self.screen_state == SCREEN_PLAYING and self.is_movie_playing()
+                    and self.player.is_running()
+                    and not getattr(self, "_subname_done", False)):
+                now = time.time()
+                if now - getattr(self, "_last_subname_try", 0) > 1.5:
+                    self._last_subname_try = now
+                    try:
+                        langs = self.movies.sub_langs
+                        if not langs or not self.player._tracks("sub"):
+                            self._subname_done = not langs
+                        else:
+                            t_ = self.player.pick_sub_by_name(langs)
+                            self._subname_done = True
+                            if t_:
+                                self.player.osd_message(
+                                    "Subtitles: " + self._track_label(t_))
+                    except Exception:
+                        self._subname_done = True
 
             # movies / episodes: trim a padded bottom edge (thin green line)
             if (self.screen_state == SCREEN_PLAYING and self.is_movie_playing()

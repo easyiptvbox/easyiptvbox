@@ -329,6 +329,37 @@ class Player:
     def set_audio(self, aid):
         self._command("set_property", "aid", aid)
 
+    # language-name words per ISO code, for tracks tagged with an odd code
+    _LANG_NAMES = {"nor": ("norw", "norsk", "bokm", "nynorsk"),
+                   "nob": ("norw", "norsk", "bokm"),
+                   "nno": ("nynorsk", "norw"),
+                   "eng": ("english", "engelsk"), "swe": ("swed", "svensk"),
+                   "dan": ("dan", "dansk"), "fin": ("finn", "fin", "suomi"),
+                   "ger": ("german", "deutsch", "tysk"),
+                   "fre": ("french", "fran"), "spa": ("span", "castil"),
+                   "ita": ("ital",), "dut": ("dutch", "neder")}
+
+    def pick_sub_by_name(self, langs):
+        """When mpv's --slang found no track (odd language code), choose the
+        first preferred language whose name appears in a track title.
+        Returns the chosen track, or None. Never overrides a track mpv
+        already selected."""
+        subs = self._tracks("sub")
+        if not subs or any(t["selected"] for t in subs):
+            return None
+        for lang in langs:
+            low = lang.lower()
+            if any((t.get("lang") or "").lower() == low for t in subs):
+                return None            # a proper match exists: mpv handles it
+        for lang in langs:
+            words = self._LANG_NAMES.get(lang.lower(), ())
+            for t in subs:
+                title = (t.get("title") or "").lower()
+                if title and any(w in title for w in words):
+                    self.set_sub(t["id"])
+                    return t
+        return None
+
     def set_sub(self, sid):
         # sid can be an int id or "no"
         self._command("set_property", "sid", sid)

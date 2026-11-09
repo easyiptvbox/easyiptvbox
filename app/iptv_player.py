@@ -254,18 +254,33 @@ class Player:
         Returns True when this video has been handled (or nothing to do),
         False if the size is not known yet."""
         vp = self.get_property("video-params")
-        if not isinstance(vp, dict) or not vp.get("w") or not vp.get("h"):
+        dar = vp.get("aspect") if isinstance(vp, dict) else None
+        # right after start mpv reports the size before the display shape:
+        # wait until both are known, otherwise the aspect step would be skipped
+        if (not isinstance(vp, dict) or not vp.get("w") or not vp.get("h")
+                or not isinstance(dar, (int, float)) or dar <= 0
+                or not vp.get("dh")):
             return False
         w, h = int(vp["w"]), int(vp["h"])
+        want_crop, want_aspect = None, None
         if h > 64 and h % 8:        # odd height: the decoder pads the frame
-            h -= h % 16             # trim to a multiple of 16 (8 was not enough)
-            self.set_property("video-crop", "%dx%d+0+0" % (w, h))
-        dar = vp.get("aspect")
-        if w >= 1280 and h > 64 and isinstance(dar, (int, float)) and dar > 0:
-            stored = w / float(vp["h"])
-            if stored > dar * 1.08:
-                # keep the real shape of the picture after cropping
-                self.set_property("video-aspect-override", round(w / float(h), 6))
+            ch = h - h % 16         # trim to a multiple of 16 (8 was not enough)
+            want_crop = "%dx%d+0+0" % (w, ch)
+            h = ch
+        if w >= 1280 and h > 64 and w / float(vp["h"]) > dar * 1.08:
+            # keep the real shape of the picture after cropping
+            want_aspect = round(w / float(h), 6)
+        if want_crop:
+            self.set_property("video-crop", want_crop)
+        if want_aspect:
+            self.set_property("video-aspect-override", want_aspect)
+        # make sure mpv really took the values; otherwise try again
+        if want_crop and self.get_property("video-crop") != want_crop:
+            return False
+        if want_aspect:
+            got = self.get_property("video-aspect-override")
+            if not isinstance(got, (int, float)) or abs(got - want_aspect) > 1e-3:
+                return False
         return True
 
     # -- movie playback controls ----------------------------------------

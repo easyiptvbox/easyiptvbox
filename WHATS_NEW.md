@@ -43,6 +43,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - README points to the QR code on the TV start page for opening the web app.
 
 **Fixed**
+- The stretched-picture fix sometimes did not apply right after a movie started (the player read the video's shape too early and skipped it). It now waits for the shape, checks that the player accepted the settings, and retries.
 - Simple mode (and any settings change): the TV became very slow and the screen seemed to restart when pressing OK. Every save in the web app started another heavy TV-guide matching job, and a dozen of them ran at once. The guide is now rebuilt by one job at a time, and only when the list of live channels actually changed. In simple mode the boot splash is no longer shown again when the list opens.
 - Quick, overlapping saves in Settings could garble `config.yaml` (two saves wrote to the same temporary file at once). Saves are now serialised and use their own temporary files.
 - Movies and episodes whose file is tagged 16:9 but whose picture is wider (for example 3840x1754) no longer look stretched vertically: the player shows them at their real shape, with black bars above and below.

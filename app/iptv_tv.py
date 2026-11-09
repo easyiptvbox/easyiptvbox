@@ -2168,6 +2168,7 @@ class App:
     def _launch(self, url, **kwargs):
         """Show a loading screen, release DRM, then start mpv."""
         self._crop_done = False
+        self._crop_tries = 0
         self._subname_done = False
         # Apply the configured live-TV audio-sync offset (seconds) to live
         # streams only. Movies/series keep the stream's own timing.
@@ -3559,9 +3560,12 @@ class App:
                 now = time.time()
                 if now - getattr(self, "_last_crop_try", 0) > 1.5:
                     self._last_crop_try = now
+                    self._crop_tries = getattr(self, "_crop_tries", 0) + 1
                     try:
                         self._crop_done = self.player.auto_crop()
                     except Exception:
+                        self._crop_done = True
+                    if self._crop_tries >= 25:      # ~40 s: stop trying
                         self._crop_done = True
 
             # Live stream that never started or ended while mpv stays alive

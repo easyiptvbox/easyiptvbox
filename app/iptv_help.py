@@ -62,8 +62,9 @@ HELP_PAGE = r"""<!DOCTYPE html>
 <tr><td>VOL + / &minus;</td><td>Volume.</td></tr>
 <tr><td>POWER</td><td>Switches the box off and on (handled by the Argon case).</td></tr>
 </table>
-<p class="tip">While the left menu (Movies / Live / Series) is selected, MENU, BACK or HOME open the menu: Add a remote, Wi-Fi setup,
-Remote access, Instructions, Standby, Power off.</p>
+<p class="tip">While the left menu (Movies / Live / Series) is selected, MENU, BACK or HOME open the menu: <b>Power off</b> (first, so
+Power then OK turns the box off even without looking at the screen), Standby, Add a remote, Wi-Fi setup, Remote access,
+Instructions.</p>
 </section>
 
 <section id="tv"><h2>Using the TV</h2>
@@ -84,6 +85,7 @@ colored square is used.</p>
 <h3>Movies and series</h3>
 <ul>
  <li>The box remembers where you stopped and asks to continue.</li>
+ <li>New movies and series are added at the top of the list, and whatever you start watching moves to the top.</li>
  <li><b>OK</b> while watching opens the menu: Resume, Audio track, Subtitles, Jump to time, Stop.</li>
  <li>The audio and subtitle languages you pick are remembered; the most recent available one is chosen automatically next time.</li>
  <li>Episodes you have watched more than 75% of are shown in green; a season turns green when all its episodes are.</li>

@@ -5,6 +5,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 26 October 2026
 
 **New**
+- Newly added movies and series (in the web app, or found by a saved search) now go to the top of their list, and a movie or an episode you start watching moves to the top too (issue #8).
 - **Simple mode** (Settings > Simple mode): for someone who just wants to watch TV. The box boots straight onto a channel you picked (from several categories, in your order) and every remote button except volume and mute switches channel: Left goes to the previous one, all others to the next. Your changes only take effect after you press **Apply**, and turning it on shows a warning with how to switch it off again. It remembers the last channel, skips channels that don't work, and the power button still works.
 - **TCP mode** for remote access (Settings > Remote access): a second way to reach the box from networks that block WireGuard. It uses VLESS + Reality (sing-box) on a TCP port you choose (default 8443), works with the sing-box, Hiddify and v2rayNG apps, only reaches the box, and is off until you turn it on.
 - **Profiles**: several people can have their own Movies, Live and Series categories, theme, text size, watch history and live pictures. Settings > Profile switches the profile in the web app (the Default profile is always shown and the TV starts on it), and Settings > Manage profiles adds, renames, protects with an optional 4-6 digit PIN, gives a picture to, or deletes profiles; a new profile can start empty or as a copy. On the TV the profiles are listed above the QR code. Provider login, TV guide, audio sync, remotes and Wi-Fi stay shared.
@@ -25,6 +26,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - Movies can be streamed to your phone/computer (Safari player, VLC, download).
 
 **Changed**
+- The TV power menu now starts with **Power off** (then Standby), so pressing Power twice (Power, then OK) turns the box off without looking at the screen (issue #7).
 - The cards in the web app's Play tab (Movies, Live TV, Series) now start collapsed: tap a title to open or close it, or use Open all / Close all. Your choices are remembered in the browser, and starting something from a card opens that card (issue #6).
 - Settings: the note "Provider, TV guide and audio sync are shared by all profiles." now sits in the Manage profiles card instead of under the profile selector (issue #5).
 - TV menu: the profiles are no longer listed above the QR code. Only the current profile's picture and name is shown there; select it and press OK to open a list of profiles to switch between.

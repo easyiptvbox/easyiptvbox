@@ -1393,7 +1393,7 @@ class App:
         self.thumbs.stop()
         self.player.stop()
         self._acquire_display()
-        self.power_index = 0  # 0=Standby, 1=Shut down, 2=Cancel
+        self.power_index = 0  # first row is "Power off"
         self._return_screen = (self.screen_state
                                if self.screen_state in (SCREEN_PLAYLISTS,
                                                         SCREEN_CHANNELS,
@@ -1401,12 +1401,12 @@ class App:
                                else SCREEN_PLAYLISTS)
         self.screen_state = SCREEN_POWER
 
-    POWER_OPTIONS = ["Add a remote",
+    POWER_OPTIONS = ["Power off",
+                     "Standby (screen off)",
+                     "Add a remote",
                      "Wi-Fi setup",
                      "Remote access",
                      "Instructions",
-                     "Standby (screen off)",
-                     "Power off",
                      "Cancel"]
 
     def _act_power(self, a):
@@ -2191,6 +2191,33 @@ class App:
             self._release_display()
         self.player.play(url, **kwargs)
 
+    def _move_watched_first(self):
+        """What you start watching moves to the top of its list (the movie, or
+        the series an episode belongs to)."""
+        pl = self.current_playlist
+        try:
+            if pl is not None and pl.is_movies and self.current_channel:
+                kind, key, items = "movies", self.current_channel.url, pl.channels
+                pos = next((i for i, c in enumerate(items) if c.url == key), -1)
+            elif pl is not None and getattr(pl, "is_series", False) \
+                    and self.current_series:
+                kind, key = "series", str(self.current_series["series_id"])
+                items = pl.series
+                pos = next((i for i, s in enumerate(items)
+                            if str(s["series_id"]) == key), -1)
+            else:
+                return
+            if pos <= 0:
+                return                  # not in the list, or already first
+            if iptv_profiles.move_to_top(kind, key, iptv_profiles.ACTIVE):
+                items.insert(0, items.pop(pos))      # keep the TV's list in step
+                if kind == "movies":
+                    self.ch_index = 0
+                else:
+                    self.series_index = 0
+        except Exception as e:
+            print("could not move to top: %s" % e, flush=True)
+
     def _start_movie(self, start=0):
         if self._stream_busy():
             if self.screen_state in (SCREEN_RESUME, SCREEN_PLAYING):
@@ -2200,6 +2227,7 @@ class App:
         url = self.current_channel.url
         self._movie_url = url
         self.movie_menu = None
+        self._move_watched_first()
         self._launch(
             url,
             start=start,

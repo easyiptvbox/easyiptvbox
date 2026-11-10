@@ -433,3 +433,29 @@ def initial_color(name):
     pal = [(176, 58, 46), (211, 84, 0), (183, 149, 11), (35, 155, 86),
            (26, 138, 142), (36, 113, 163), (113, 75, 160), (160, 64, 130)]
     return pal[h % len(pal)]
+
+
+def move_to_top(kind, key, pid=None):
+    """Move a saved movie (kind "movies", key = url) or series (kind "series",
+    key = series_id) to the top of its list in this profile's config.
+    Returns True when the order changed. Safe against concurrent saves."""
+    pid = pid or ACTIVE
+    flag = "is_movies" if kind == "movies" else "is_series"
+    with CONFIG_LOCK:
+        data = read_config_data(pid)
+        for pl in (data.get("playlists") or []):
+            if not pl.get(flag):
+                continue
+            items = pl.get("channels" if kind == "movies" else "series") or []
+            for i, it in enumerate(items):
+                same = (str(it.get("url")) == str(key) if kind == "movies"
+                        else str(it.get("series_id")) == str(key))
+                if same:
+                    if i == 0:
+                        return False
+                    items.insert(0, items.pop(i))
+                    from iptv_web import build_config_yaml
+                    write_config_text(build_config_yaml(data), pid)
+                    return True
+    return False
+

@@ -2039,7 +2039,7 @@ function cleanMovieName(n){
 }
 function addMovie(mv,btn){
   if(movieAdded(mv.url)) return;
-  moviesPl().channels.push({name:cleanMovieName(mv.name),url:mv.url,logo:mv.logo||''});
+  moviesPl().channels.unshift({name:cleanMovieName(mv.name),url:mv.url,logo:mv.logo||''});
   btn.textContent='Added'; btn.classList.add('done'); btn.disabled=true;
   renderMoviesAdded();
 }
@@ -2080,7 +2080,7 @@ function seriesAddedId(id){
 }
 function addSeries(se,btn){
   if(seriesAddedId(se.series_id)) return;
-  seriesPl().series.push({series_id:se.series_id,name:se.name,logo:se.logo||''});
+  seriesPl().series.unshift({series_id:se.series_id,name:se.name,logo:se.logo||''});
   btn.textContent='Added'; btn.classList.add('done'); btn.disabled=true;
   renderSeriesAdded();
 }

@@ -119,20 +119,24 @@ def check():
             cat = category("is_movies", "Movies")
             chans = cat.setdefault("channels", [])
             have = {c.get("url") for c in chans}
+            fresh = []
             for it in new:
                 if it["url"] not in have:
-                    chans.append({"name": _clean_movie_name(it["name"]),
+                    fresh.append({"name": _clean_movie_name(it["name"]),
                                   "url": it["url"], "logo": it.get("logo", "")})
                     added += 1
+            chans[0:0] = fresh          # new movies go first
         else:
             cat = category("is_series", "Series")
             lst = cat.setdefault("series", [])
             have = {str(x.get("series_id")) for x in lst}
+            fresh = []
             for it in new:
                 if str(it["series_id"]) not in have:
-                    lst.append({"series_id": str(it["series_id"]),
-                                "name": it["name"], "logo": it.get("logo", "")})
+                    fresh.append({"series_id": str(it["series_id"]),
+                                  "name": it["name"], "logo": it.get("logo", "")})
                     added += 1
+            lst[0:0] = fresh            # new series go first
         print("saved search '%s' (%s): added %d new result(s), search removed"
               % (s.get("query"), kind, len(new)), flush=True)
         # search done: not kept in `remaining`

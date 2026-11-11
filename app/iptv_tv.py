@@ -3528,6 +3528,7 @@ class App:
                 self._save_movie_position()
                 self._last_saved_pos = time.time()
 
+            self.player.osd_tick()            # keep menus / banners drawn
             if self.cfg.simple_mode:
                 self._simple_tick()
             if iptv_profiles.ACTIVE != self._loaded_profile and \

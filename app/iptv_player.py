@@ -13,6 +13,17 @@ class Player:
         self.proc = None
         self._sock = None
         self.is_live = False
+        # Volume and mute belong to the box, not to one stream: every channel
+        # or movie starts a new mpv, so they are remembered here (until the
+        # box restarts) and handed to each new mpv.
+        self.volume = 100
+        self.muted = False
+        # on-screen overlay (movie menu, channel banner): kept alive by
+        # osd_tick() so a lost or un-redrawn first update never leaves it
+        # invisible
+        self._ov = None            # (id, ass text) currently shown
+        self._ov_n = 0
+        self._ov_at = 0.0
 
     def is_running(self):
         return self.proc is not None and self.proc.poll() is None
@@ -156,6 +167,8 @@ class Player:
             cmd.append("--start=+%d" % int(start))
         if audio_delay:
             cmd.append("--audio-delay=%.3f" % float(audio_delay))
+        cmd.append("--volume=%d" % int(self.volume))
+        cmd.append("--mute=%s" % ("yes" if self.muted else "no"))
         cmd.append(url)
         env = dict(os.environ)
         self.proc = subprocess.Popen(
@@ -180,16 +193,45 @@ class Player:
         except OSError:
             return None
 
-    def _command(self, *args):
-        s = self._connect()
-        if not s:
-            return None
+    @staticmethod
+    def _drain(s):
+        """Throw away what mpv has sent us (replies, events) so the socket
+        never fills up."""
         try:
-            s.sendall((json.dumps({"command": list(args)}) + "\n").encode())
-            return True
+            s.setblocking(False)
+            while True:
+                if not s.recv(65536):
+                    break
+        except (BlockingIOError, InterruptedError):
+            pass
         except OSError:
-            self._sock = None
-            return None
+            raise
+        finally:
+            try:
+                s.settimeout(1.0)
+            except OSError:
+                pass
+
+    def _command(self, *args):
+        """Send a command to mpv (no reply is waited for). A failed send is
+        retried once on a fresh connection instead of being lost."""
+        payload = (json.dumps({"command": list(args)}) + "\n").encode()
+        for _attempt in (0, 1):
+            s = self._connect()
+            if not s:
+                return None
+            try:
+                self._drain(s)
+                s.sendall(payload)
+                return True
+            except OSError:
+                try:
+                    s.close()
+                except OSError:
+                    pass
+                self._sock = None
+        print("mpv command failed: %s" % (args[0] if args else "?"), flush=True)
+        return None
 
     def get_property(self, name, default=None):
         """Query an mpv property and return its value (or default).
@@ -381,24 +423,58 @@ class Player:
 
     # -- on-screen overlay (ASS) drawn over the video by mpv itself -----
     def osd_show(self, ass_text, overlay_id=1):
+        self._ov = (overlay_id, ass_text)
+        self._ov_n = 0
+        self._ov_at = time.time() + 0.15
         self._command("osd-overlay", overlay_id, "ass-events", ass_text)
 
+    def osd_tick(self):
+        """Re-send the overlay shortly after it was drawn and then now and
+        then while it is shown: mpv sometimes does not draw the first update
+        (for example right after pausing), and a lost update must not leave
+        the menu invisible. The text gets a harmless changing comment so mpv
+        treats it as new."""
+        ov = self._ov
+        if ov is None or time.time() < self._ov_at:
+            return
+        self._ov_n += 1
+        self._ov_at = time.time() + (0.3 if self._ov_n < 4 else 2.0)
+        self._command("osd-overlay", ov[0], "ass-events",
+                      ov[1] + "{r%d}" % (self._ov_n % 1000))
+
     def osd_clear(self, overlay_id=1):
+        self._ov = None
         self._command("osd-overlay", overlay_id, "none", "")
 
     def osd_message(self, text, seconds=2.0):
         self._command("show-text", text, int(seconds * 1000))
 
     def volume_up(self):
+        self.volume = min(130, self.volume + 5)
         self._command("add", "volume", 5)
 
     def volume_down(self):
+        self.volume = max(0, self.volume - 5)
         self._command("add", "volume", -5)
 
     def toggle_mute(self):
+        self.muted = not self.muted
         self._command("cycle", "mute")
 
+    def _remember_audio(self):
+        """Keep the volume / mute of the running mpv (best effort)."""
+        if not self.is_running():
+            return
+        v = self.get_property("volume", None)
+        m = self.get_property("mute", None)
+        if isinstance(v, (int, float)):
+            self.volume = max(0, min(130, int(round(v))))
+        if isinstance(m, bool):
+            self.muted = m
+
     def stop(self):
+        self._ov = None
+        self._remember_audio()
         if self._sock:
             try:
                 self._sock.close()

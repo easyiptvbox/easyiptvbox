@@ -2047,6 +2047,42 @@ class App:
     def _simple_chans(self):
         return self.cfg.simple_channels
 
+    def _simple_groups(self):
+        """The list as the viewer sees it: every channel / movie is one item,
+        and all episodes of one added season together are one item."""
+        groups = []
+        for i, c in enumerate(self._simple_chans()):
+            if groups and c.gid and self._simple_chans()[groups[-1][0]].gid == c.gid:
+                groups[-1].append(i)
+            else:
+                groups.append([i])
+        return groups
+
+    def _simple_group_no(self, idx):
+        for g, members in enumerate(self._simple_groups()):
+            if idx in members:
+                return g
+        return 0
+
+    def _simple_entry(self, g):
+        """Channel index to start for item g: a season continues with the
+        episode in progress, else the first one not watched yet."""
+        members = self._simple_groups()[g % len(self._simple_groups())]
+        if len(members) == 1:
+            return members[0]
+        chans = self._simple_chans()
+        last = self._ui_state_read().get("simple_last")
+        for i in members:
+            if chans[i].url == last:
+                return i
+        for i in members:
+            if self.movies.get_position(chans[i].url):
+                return i
+        for i in members:
+            if not self.movies.is_watched(chans[i].url):
+                return i
+        return members[0]
+
     def _simple_last_index(self):
         last = self._ui_state_read().get("simple_last")
         for i, c in enumerate(self._simple_chans()):
@@ -2135,6 +2171,7 @@ class App:
         ended = bool(last and last[0] == url and last[2]
                      and last[1] >= last[2] - 120)
         n = len(self._simple_chans())
+        chans = self._simple_chans()
         if ended:
             self.movies.mark_watched(url)
             self.movies.clear_position(url)
@@ -2143,7 +2180,14 @@ class App:
         self._movie_url = None
         self.movie_menu = None
         if ended:
-            self._simple_start((self.ch_index + 1) % n)
+            nxt = (self.ch_index + 1) % n
+            if not (chans[self.ch_index].gid
+                    and chans[nxt].gid == chans[self.ch_index].gid
+                    and nxt > self.ch_index):
+                # season finished (or a single movie): next item of the list
+                nxt = self._simple_entry(
+                    self._simple_group_no(self.ch_index) + 1)
+            self._simple_start(nxt)
         else:                       # died: retry it, or move on if it keeps dying
             self._simple_start(self.ch_index, auto=True)
         return True
@@ -2157,7 +2201,8 @@ class App:
         ch = chans[idx % len(chans)]
         body = (r"{\an7}{\pos(70,50)}{\bord3}{\shad0}{\1c&HFFFFFF&}"
                 r"{\3c&H000000&}{\fs60}{\b1}%d  %s{\b0}" % (
-                    idx % len(chans) + 1, self._ass(ch.name)))
+                    self._simple_group_no(idx % len(chans)) + 1,
+                    self._ass(ch.name)))
         try:
             cur, _nxt = self.epg.now_next(ch.tvg_id, ch.name) \
                 if getattr(ch, "kind", "live") == "live" else (None, None)
@@ -2169,11 +2214,11 @@ class App:
         self._banner_until = time.time() + hold
 
     def _simple_step(self, step):
-        chans = self._simple_chans()
-        n = len(chans)
+        n = len(self._simple_groups())
         base = self._simple_pending if self._simple_pending is not None \
             else self.ch_index
-        self._simple_pending = (base + step) % n
+        g = (self._simple_group_no(base) + step) % n
+        self._simple_pending = self._simple_entry(g)
         self._simple_apply_at = time.time() + 0.6   # let quick presses settle
         if self.screen_state == SCREEN_PLAYING:
             self._simple_banner(self._simple_pending, hold=3.0)

@@ -58,6 +58,8 @@ if HAVE_EVDEV:
         ecodes.KEY_HOME: HOME,
         ecodes.KEY_MENU: MENU,
         ecodes.KEY_CONTEXT_MENU: MENU,
+        ecodes.KEY_COMPOSE: MENU,          # menu key of many USB / air-mouse remotes
+        ecodes.KEY_HOMEPAGE: HOME,
         ecodes.KEY_VOLUMEUP: VOL_UP,
         ecodes.KEY_VOLUMEDOWN: VOL_DOWN,
         ecodes.KEY_POWER: POWER,
@@ -159,6 +161,7 @@ class RemoteInput:
         self._last_action_t = 0.0
         self._learned = {}        # code -> action
         self.raw_listener = None  # callable(code) used by the learn wizard
+        self.key_listener = None  # callable(name) for USB keyboard keys while learning
         self.reload_learned()
 
     def pause(self):
@@ -258,6 +261,14 @@ class RemoteInput:
                 if event.type != ecodes.EV_KEY or event.value not in (1, 2):
                     continue
                 if self._paused:
+                    # learn wizard open: tell it when a USB keyboard-type
+                    # remote is used (those need no learning)
+                    if (event.value == 1 and self.key_listener is not None
+                            and dev.info.bustype == 0x03):
+                        try:
+                            self.key_listener(dev.name or "USB remote")
+                        except Exception:
+                            pass
                     continue
                 action = KEYMAP.get(event.code)
                 if not action:
@@ -359,7 +370,12 @@ class RemoteLearner:
 
     def start(self):
         self.remote.raw_listener = self._on_code
+        self.remote.key_listener = self._on_key
+        self.keyboard_seen = None
         return True
+
+    def _on_key(self, name):
+        self.keyboard_seen = name
 
     def next_press(self, timeout=None):
         try:
@@ -378,5 +394,6 @@ class RemoteLearner:
         return "raw"
 
     def stop(self):
+        self.remote.key_listener = None
         if self.remote.raw_listener == self._on_code:
             self.remote.raw_listener = None

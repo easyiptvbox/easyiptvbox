@@ -1506,6 +1506,13 @@ class App:
         captured press and advances the wizard."""
         if self.screen_state != SCREEN_LEARN or self._learn_done:
             return
+        if getattr(self._learner, "keyboard_seen", None):
+            # a USB remote (keyboard-type, e.g. air mouse) was pressed:
+            # it works as it is, no learning needed
+            self._cancel_learn()
+            self.notify("This remote works as a keyboard - no setup needed. "
+                        "Its buttons already control the box.", 8)
+            return
         press = self._learner.next_press(timeout=0)
         if not press:
             return
@@ -2737,7 +2744,8 @@ class App:
             "Learned: %d    (remote lacks this button? press OK to skip it)"
             % len(self._learn_map), True, DIM)
         self._blit_center(done, int(self.H * 0.70))
-        self._draw_hint("Press each button once and wait for the next prompt.")
+        self._draw_hint("Press each button once and wait for the next prompt. "
+                        "USB remotes need no setup: just press any button.")
 
     # -- wifi list drawing ----------------------------------------------
     def _draw_wifi_list(self):

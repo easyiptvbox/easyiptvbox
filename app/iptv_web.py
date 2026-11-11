@@ -168,15 +168,52 @@ class ControlServer:
                           .get("simple_mode") or {})
                 except Exception:
                     sm = {}
-                chans = [{"id": iptv_stream.movie_id(str(c.get("url", ""))),
-                          "name": str(c.get("name", ""))}
-                         for c in (sm.get("channels") or [])
-                         if isinstance(c, dict) and c.get("url")]
+                chans = []
+                for c in (sm.get("channels") or []):
+                    if not (isinstance(c, dict) and c.get("url")):
+                        continue
+                    gid = str(c.get("gid") or "")
+                    if gid and chans and chans[-1]["id"] == gid:
+                        chans[-1]["count"] += 1      # next episode of a season
+                        continue
+                    chans.append({
+                        "id": gid or iptv_stream.movie_id(str(c["url"])),
+                        "name": str(c.get("group") if gid else c.get("name", "")),
+                        "kind": "season" if gid else
+                                ("movie" if c.get("kind") == "movie" else "live"),
+                        "count": 1})
                 return {"enabled": bool(sm.get("enabled")) and bool(chans),
                         "channels": chans,
                         "editable": iptv_profiles.current() ==
                                     iptv_profiles.DEFAULT and
                                     not self._is_remote()}
+
+            def _season_entries(self, gid):
+                """Episodes of one season ("s:<series id>:<season no.>") as
+                simple-mode entries; None if the series is not added."""
+                try:
+                    _s, sid, idx = gid.split(":", 2)
+                    idx = int(idx)
+                    from iptv_config import fetch_series_episodes, load_config
+                    cfg = load_config()
+                    name = None
+                    for pl in cfg.playlists:
+                        for se in getattr(pl, "series", []) or []:
+                            if str(se["series_id"]) == sid:
+                                name = se["name"]
+                    if name is None:
+                        return None
+                    data = fetch_series_episodes(
+                        cfg._data.get("provider") or {}, sid)
+                    season = data["seasons"][idx]
+                    group = "%s - %s" % (name, season.get("name") or
+                                         "Season %s" % season.get("season"))
+                    return [{"name": "%s - %s" % (name, e["title"]),
+                             "url": e["url"], "kind": "movie",
+                             "gid": gid, "group": group}
+                            for e in season["episodes"]] or None
+                except Exception:
+                    return None
 
             def _handle_simple_set(self, raw):
                 with iptv_profiles.CONFIG_LOCK:
@@ -213,27 +250,39 @@ class ControlServer:
                 have = {}
                 for c in ((data.get("simple_mode") or {}).get("channels") or []):
                     if isinstance(c, dict) and c.get("url"):
-                        have[iptv_stream.movie_id(str(c["url"]))] = c
+                        key = str(c.get("gid") or "") or \
+                            iptv_stream.movie_id(str(c["url"]))
+                        have.setdefault(key, []).append(c)
                 pool = {}
                 try:
                     cfg = load_config()
                     for pl in cfg.playlists:
-                        if pl.is_movies or getattr(pl, "is_series", False):
+                        if getattr(pl, "is_series", False):
                             continue
                         for c in pl.channels:
                             if c.url:
-                                pool.setdefault(iptv_stream.movie_id(c.url), {
-                                    "name": c.name, "url": c.url,
-                                    "logo": c.logo, "tvg_id": c.tvg_id})
+                                e = {"name": c.name, "url": c.url,
+                                     "logo": c.logo, "tvg_id": c.tvg_id}
+                                if pl.is_movies:
+                                    e = {"name": c.name, "url": c.url,
+                                         "kind": "movie"}
+                                pool.setdefault(iptv_stream.movie_id(c.url),
+                                                [e])
                 except Exception:
                     pass
-                chans, seen = [], set()
+                chans, seen, found = [], set(), 0
                 for i in ids:
-                    c = have.get(i) or pool.get(i)
-                    if c and i not in seen:
+                    if i in seen:
+                        found += 1
+                        continue
+                    ents = have.get(i) or pool.get(i)
+                    if not ents and i.startswith("s:"):
+                        ents = self._season_entries(i)
+                    if ents:
                         seen.add(i)
-                        chans.append(dict(c))
-                if len(chans) != len(ids):
+                        found += 1
+                        chans.extend(dict(e) for e in ents)
+                if found != len(ids) or len(chans) > 3000:
                     self._send(400, {"error": "Some channels were not found. "
                                      "Reload the page and try again."})
                     return
@@ -1260,6 +1309,11 @@ def _clean_simple_mode(sm):
         if not name or not url:
             continue
         ch = {"name": name, "url": url}
+        if c.get("kind") == "movie":
+            ch["kind"] = "movie"
+        for k in ("gid", "group"):
+            if str(c.get(k) or "").strip():
+                ch[k] = str(c[k]).strip()
         if str(c.get("logo") or "").strip():
             ch["logo"] = str(c["logo"]).strip()
         if str(c.get("tvg_id") or "").strip():
@@ -1623,15 +1677,17 @@ PAGE = r"""<!DOCTYPE html>
       <h2><a class="hl" href="/help#simple" target="_blank" rel="noopener">Simple mode <span class="hi">?</span></a></h2>
       <div class="pnote" style="margin-top:0">For someone who just wants to watch TV: the box starts straight on a channel,
         and every button on the remote (except volume and mute) switches channel: Left goes to the previous one,
-        all other buttons to the next. The menus are not available on the TV. This setting is shared by the whole box.
+        all other buttons to the next. You can also add <b>movies</b> and whole <b>seasons</b> of series: they play from where you
+        stopped, show their title for a moment, and when one ends the next item in the list starts by itself (there is no pause).
+        The menus are not available on the TV. This setting is shared by the whole box.
         <b>Your changes here are only used after you press &ldquo;Apply&rdquo;.</b></div>
       <label style="display:flex;gap:.6rem;align-items:center;margin-top:.7rem;cursor:pointer">
         <input type="checkbox" id="smOn" style="width:auto;margin:0">
         <span>Use simple mode</span>
       </label>
-      <label>Channels in the list (in this order)</label>
+      <label>Items in the list (in this order)</label>
       <div id="smList"></div>
-      <label style="margin-top:.8rem">Add channels</label>
+      <label style="margin-top:.8rem">Add channels, movies or seasons</label>
       <select id="smCat"></select>
       <input type="text" id="smFilter" placeholder="Filter by name" style="margin-top:.4rem" autocomplete="off">
       <div id="smResults" style="margin-top:.4rem"></div>
@@ -2467,7 +2523,7 @@ $('profCreate').onclick=async()=>{
 };
 
 // ---- Simple mode ----
-let SM={enabled:false,channels:[],editable:true}, SMCAT=[];
+let SM={enabled:false,channels:[],editable:true}, SMCAT=[], SMSEAS={};
 function smMsg(ok,t){ const m=$('smMsg'); m.textContent=t; m.style.color=ok?'var(--oktx)':'var(--errtx)'; }
 let SM_SAVED=null;                       // what the box has now (JSON), to detect changes
 const smSnap=()=>JSON.stringify({e:SM.enabled,c:SM.channels.map(c=>c.id)});
@@ -2510,7 +2566,7 @@ function smRender(){
   SM.channels.forEach((c,i)=>{
     const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:.4rem;margin:.25rem 0';
     const n=document.createElement('div'); n.style.cssText='flex:0 0 1.6rem;color:var(--dim)'; n.textContent=(i+1);
-    const nm=document.createElement('div'); nm.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; nm.textContent=c.name;
+    const nm=document.createElement('div'); nm.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; nm.textContent=(c.kind==='movie'?'\uD83C\uDFAC ':c.kind==='season'?'\uD83D\uDCFA ':'')+c.name+(c.count>1?' ('+c.count+' episodes)':'');
     row.appendChild(n); row.appendChild(nm);
     const mk=(t,fn,dis)=>{ const b=document.createElement('button'); b.className='ghost'; b.type='button'; b.textContent=t;
       b.style.cssText='flex:0 0 auto;padding:.25rem .55rem'; b.disabled=!ed||!!dis; b.onclick=fn; row.appendChild(b); };
@@ -2519,18 +2575,48 @@ function smRender(){
     mk('\u2715',()=>{ SM.channels.splice(i,1); if(!SM.channels.length) SM.enabled=false; smRender(); });
     list.appendChild(row);
   });
-  if(!SM.channels.length) list.innerHTML='<div style="color:var(--dim)">No channels yet. Add some below.</div>';
+  if(!SM.channels.length) list.innerHTML='<div style="color:var(--dim)">Nothing yet. Add some below.</div>';
   const cat=SMCAT[$('smCat').value]; const q=$('smFilter').value.trim().toLowerCase();
   const res=$('smResults'); res.innerHTML='';
   if(!cat){ res.innerHTML='<div style="color:var(--dim)">Add live categories first (Live categories above).</div>'; return; }
   const have=new Set(SM.channels.map(c=>c.id));
+  if(cat.type==='series'){
+    const hs=cat.channels.filter(c=>!q||c.name.toLowerCase().includes(q));
+    hs.slice(0,40).forEach(se=>{
+      const row=document.createElement('div'); row.style.cssText='margin:.2rem 0';
+      const top=document.createElement('div'); top.style.cssText='display:flex;align-items:center;gap:.4rem';
+      const nm=document.createElement('div'); nm.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; nm.textContent=se.name;
+      const b=document.createElement('button'); b.className='ghost'; b.type='button'; b.style.cssText='flex:0 0 auto;padding:.25rem .7rem';
+      b.textContent=SMSEAS[se.id]?'Hide seasons':'Seasons';
+      b.onclick=async()=>{
+        if(SMSEAS[se.id]){ delete SMSEAS[se.id]; smRender(); return; }
+        b.textContent='Loading\u2026';
+        try{ const r=await fetch('/api/play/series?sid='+encodeURIComponent(se.id)); const d=await r.json();
+          if(!r.ok) throw new Error(d.error||'failed'); SMSEAS[se.id]=d.seasons||[]; }catch(e){ smMsg(false,'Could not load seasons: '+e.message); }
+        smRender();
+      };
+      top.appendChild(nm); top.appendChild(b); row.appendChild(top);
+      (SMSEAS[se.id]||[]).forEach((s,k)=>{
+        const gid='s:'+se.id+':'+k;
+        const r2=document.createElement('div'); r2.style.cssText='display:flex;align-items:center;gap:.4rem;margin:.15rem 0 .15rem 1.2rem';
+        const n2=document.createElement('div'); n2.style.cssText='flex:1;min-width:0'; n2.textContent=s.name+' ('+s.episodes.length+' episodes)';
+        const b2=document.createElement('button'); b2.className='ghost'; b2.type='button'; b2.style.cssText='flex:0 0 auto;padding:.25rem .7rem';
+        if(have.has(gid)){ b2.textContent='\u2713 added'; b2.disabled=true; }
+        else{ b2.textContent='Add'; b2.disabled=!ed; b2.onclick=()=>{ SM.channels.push({id:gid,name:se.name+' - '+s.name,kind:'season',count:s.episodes.length}); smRender(); }; }
+        r2.appendChild(n2); r2.appendChild(b2); row.appendChild(r2);
+      });
+      res.appendChild(row);
+    });
+    if(!hs.length) res.innerHTML='<div style="color:var(--dim)">No series found. Add series under Settings first.</div>';
+    return;
+  }
   const hits=cat.channels.filter(c=>!q||c.name.toLowerCase().includes(q));
   hits.slice(0,60).forEach(c=>{
     const row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:.4rem;margin:.2rem 0';
     const nm=document.createElement('div'); nm.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap'; nm.textContent=c.name;
     const b=document.createElement('button'); b.className='ghost'; b.type='button'; b.style.cssText='flex:0 0 auto;padding:.25rem .7rem';
     if(have.has(c.id)){ b.textContent='\u2713 added'; b.disabled=true; }
-    else{ b.textContent='Add'; b.disabled=!ed; b.onclick=()=>{ SM.channels.push({id:c.id,name:c.name}); smRender(); }; }
+    else{ b.textContent='Add'; b.disabled=!ed; b.onclick=()=>{ SM.channels.push({id:c.id,name:c.name,kind:cat.type==='movies'?'movie':'live',count:1}); smRender(); }; }
     row.appendChild(nm); row.appendChild(b); res.appendChild(row);
   });
   if(hits.length>60){ const m=document.createElement('div'); m.className='pnote'; m.textContent='Showing 60 of '+hits.length+' - type in the filter to narrow it down.'; res.appendChild(m); }
@@ -2542,7 +2628,9 @@ async function loadSimple(keepFilter){
     SM=await (await fetch('/api/simple')).json();
     SM_SAVED=smSnap();
     const c=await (await fetch('/api/play/catalog')).json();
-    SMCAT=c.live||[];
+    SMCAT=(c.live||[]).slice();
+    if((c.movies||[]).length) SMCAT.push({name:'Movies (saved)',type:'movies',channels:c.movies});
+    if((c.series||[]).length) SMCAT.push({name:'Series',type:'series',channels:c.series.map(s=>({id:s.sid,name:s.name}))});
   }catch(e){ return; }
   const sel=$('smCat'), keep=sel.value; sel.innerHTML='';
   SMCAT.forEach((k,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=k.name+' ('+k.channels.length+')'; sel.appendChild(o); });

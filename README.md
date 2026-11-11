@@ -101,6 +101,8 @@ the changes per week (also linked from Settings).
    - **Simple mode** (Settings > Simple mode): the box boots straight into a chosen
      list of live channels; every remote button switches channel (Left = previous,
      all others = next, except volume/mute). Applied only after pressing Apply.
+     The list can also hold saved movies and whole series seasons: they resume
+     where you stopped, show only a title, and the next item starts when one ends.
    - **Profiles**: with extra profiles created (Settings > Manage profiles) the menu lists
      the current profile above the QR code; OK on it opens a list to switch
      profile, and PIN-protected profiles ask for a PIN on the TV.

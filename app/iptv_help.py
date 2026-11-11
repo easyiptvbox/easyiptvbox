@@ -161,7 +161,11 @@ straight on a channel, with no menus.</p>
  <li>On the TV <b>every button switches channel</b>: <b>Left</b> goes to the previous channel, <b>all other buttons</b> go to the
   next one. Only <b>volume and mute</b> work as usual. A banner shows the number and name (and what is on now, if the TV guide
   has it). Press several times quickly and only the last channel opens.</li>
- <li>After a restart the box continues on the channel that was playing last.</li>
+ <li>You can also add <b>movies</b> (from the ones saved under Movies) and whole <b>seasons</b> of series (Add channels, movies or
+  seasons &gt; Series &gt; Seasons). They sit in the same list and the same buttons apply (no pause). A movie or episode
+  <b>continues where you stopped</b> without asking, and only its title is shown for a moment. When it ends, <b>the next item in
+  the list starts by itself</b>; after the last item the list starts over. Every episode of an added season is played in order.</li>
+ <li>After a restart the box continues on the channel (or movie / episode) that was playing last.</li>
  <li>The <b>power button</b> still opens the Standby / Power off prompt, Wi-Fi setup and so on.</li>
  <li>A channel that does not work is retried and then skipped, so the picture never stays black for long.</li>
  <li>To leave simple mode, untick it here in the web app and press <b>Apply</b> (it applies at once). It is a setting of the whole box,

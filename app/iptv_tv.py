@@ -2071,6 +2071,9 @@ class App:
         chans = self._simple_chans()
         if not chans:
             return
+        if self.screen_state == SCREEN_PLAYING and self.is_movie_playing() \
+                and self.player.is_running():
+            self._save_movie_position()          # keep the place in the movie
         if iptv_profiles.ACTIVE != iptv_profiles.DEFAULT:
             iptv_profiles.ACTIVE = iptv_profiles.DEFAULT   # box-wide mode
             self._apply_profile()
@@ -2098,6 +2101,8 @@ class App:
         from iptv_config import Playlist
         pl = Playlist("Simple")
         pl.channels = list(chans)
+        is_media = getattr(chans[idx], "kind", "live") == "movie"
+        pl.is_movies = is_media        # movies/episodes: resume, saved place
         self.current_playlist = pl
         self.show_thumbs = False
         self._grid_play = None
@@ -2106,10 +2111,42 @@ class App:
         self._simple_started_at = now
         self._idle_tries = 0
         self._idle_since = 0
-        self.play_channel(idx)
+        if is_media:
+            self._movie_url = None
+            self.current_channel = chans[idx]
+            self._episode_return = SCREEN_CHANNELS
+            rec = self.movies.get_position(chans[idx].url)
+            start = int(rec["pos"]) if rec and rec.get("pos", 0) > 15 else 0
+            self._start_movie(start=start)       # no question: just continue
+        else:
+            self.play_channel(idx)
         if self.screen_state == SCREEN_PLAYING:
             self._ui_state_update(simple_last=chans[idx].url)
             self._simple_banner(idx)
+
+    def _simple_media_ended(self):
+        """Simple mode: a movie / episode stopped playing. When it ran to the
+        end, the next item of the list starts by itself (the list wraps
+        around). Returns True when handled here."""
+        if not (self.is_movie_playing() and self._movie_url):
+            return False
+        url = self._movie_url
+        last = getattr(self, "_last_progress", None)
+        ended = bool(last and last[0] == url and last[2]
+                     and last[1] >= last[2] - 120)
+        n = len(self._simple_chans())
+        if ended:
+            self.movies.mark_watched(url)
+            self.movies.clear_position(url)
+        elif last and last[0] == url and last[2]:
+            self.movies.save_position(url, last[1], last[2])
+        self._movie_url = None
+        self.movie_menu = None
+        if ended:
+            self._simple_start((self.ch_index + 1) % n)
+        else:                       # died: retry it, or move on if it keeps dying
+            self._simple_start(self.ch_index, auto=True)
+        return True
 
     def _simple_banner(self, idx, hold=4.0):
         """Big channel number + name (+ now playing) over the picture, drawn
@@ -2122,7 +2159,8 @@ class App:
                 r"{\3c&H000000&}{\fs60}{\b1}%d  %s{\b0}" % (
                     idx % len(chans) + 1, self._ass(ch.name)))
         try:
-            cur, _nxt = self.epg.now_next(ch.tvg_id, ch.name)
+            cur, _nxt = self.epg.now_next(ch.tvg_id, ch.name) \
+                if getattr(ch, "kind", "live") == "live" else (None, None)
         except Exception:
             cur = None
         if cur:
@@ -2214,9 +2252,9 @@ class App:
         if self.screen_state == SCREEN_STANDBY:
             self._wake_from_standby()
         if self.cfg.simple_mode:
-            # only channels of the simple list can be played on the TV
+            # only items of the simple list can be played on the TV
             for i, c in enumerate(self._simple_chans()):
-                if req.get("kind") == "live" and c.url == req.get("url"):
+                if c.url == req.get("url"):
                     self._simple_start(i)
                     return
             self.notify("Simple mode is on", 3)
@@ -2374,6 +2412,8 @@ class App:
         to the top of the saved Movies list only if it is saved there."""
         pl = self.current_playlist
         try:
+            if pl is not None and pl.name == "Simple":
+                return                   # simple mode: its own fixed list
             if pl is not None and pl.is_movies and self.current_channel:
                 kind, key = "movies", self.current_channel.url
                 root = getattr(pl, "folder_of", None)
@@ -3901,7 +3941,9 @@ class App:
                 self._idle_ok_since = 0
 
             # if video died unexpectedly, fall back to menu
-            if self.screen_state == SCREEN_PLAYING and not self.player.is_running():
+            if (self.screen_state == SCREEN_PLAYING
+                    and not self.player.is_running()
+                    and not (self.cfg.simple_mode and self._simple_media_ended())):
                 was_series = bool(self.current_playlist and getattr(
                     self.current_playlist, "is_series", False))
                 if self.is_movie_playing():

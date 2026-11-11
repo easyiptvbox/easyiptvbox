@@ -22,9 +22,10 @@ TEXT_SIZES = {"small": 0.75, "normal": 1.0, "large": 1.3, "extra_large": 1.6}
 
 
 class Channel:
-    __slots__ = ("name", "url", "logo", "tvg_id")
+    __slots__ = ("name", "url", "logo", "tvg_id", "kind")
 
-    def __init__(self, name, url, logo="", tvg_id=""):
+    def __init__(self, name, url, logo="", tvg_id="", kind="live"):
+        self.kind = kind      # "live", or "movie" (movie / episode, simple mode)
         self.name = name
         self.url = url
         self.logo = logo
@@ -66,7 +67,8 @@ class Config:
             if isinstance(ch, dict) and ch.get("url") and ch.get("name"):
                 self.simple_channels.append(Channel(
                     str(ch["name"]), str(ch["url"]), str(ch.get("logo", "")),
-                    str(ch.get("tvg_id", ""))))
+                    str(ch.get("tvg_id", "")),
+                    "movie" if ch.get("kind") == "movie" else "live"))
         self.simple_mode = bool(sm.get("enabled")) and bool(self.simple_channels)
         self.autoplay_first = bool(s.get("autoplay_first_channel", False))
         self.show_clock = bool(s.get("show_clock", True))

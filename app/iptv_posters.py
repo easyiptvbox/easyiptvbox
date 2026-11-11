@@ -19,14 +19,15 @@ POSTER_DIR = os.path.join(CACHE_DIR, "posters")
 POSTER_W, POSTER_H = 240, 360
 TIMEOUT = 6
 MAX_BYTES = 6 * 1024 * 1024         # refuse huge downloads
-MAX_FILES = 5000
-MAX_TOTAL = 300 * 1024 * 1024
+MAX_FILES = 12000
+MAX_TOTAL = 500 * 1024 * 1024
 RETRY_AFTER = 1800                  # seconds before retrying a failed URL
 UA = "Mozilla/5.0 (X11; Linux aarch64) EasyIPTVBox"
 
 version = 0                         # bumped whenever a new poster lands
-_q = queue.Queue()
-_pending = set()
+_q = queue.PriorityQueue()          # (priority, seq, url): 0 = on screen, 1 = pre-cache
+_seq = 0
+_pending = {}                       # url -> best priority queued
 _failed = {}                        # url -> time of failure
 _lock = threading.Lock()
 _started = False
@@ -48,30 +49,50 @@ def has_poster(url):
         return False
 
 
-def request(urls):
-    """Queue posters for download (no-op for cached/failed/queued ones)."""
-    global _started
+def request(urls, low=False):
+    """Queue posters for download (no-op for cached/failed/queued ones).
+    low=True is for pre-caching: it never delays posters that are on screen
+    (those are asked for with the default priority and jump the queue)."""
+    global _started, _seq
+    prio = 1 if low else 0
     for u in urls:
         if not _ok_url(u) or has_poster(u):
             continue
         with _lock:
-            if u in _pending:
+            if _pending.get(u, 9) <= prio:
                 continue
             ft = _failed.get(u)
             if ft and time.time() - ft < RETRY_AFTER:
                 continue
-            _pending.add(u)
-        _q.put(u)
+            _pending[u] = prio
+            _seq += 1
+            _q.put((prio, _seq, u))
     if not _started:
         _started = True
         threading.Thread(target=_worker, daemon=True).start()
 
 
+def _smaller(url):
+    """TMDB serves the same poster in many sizes; the cache only needs 240x360,
+    so ask for the 342 px one (about 5x less to download)."""
+    import re
+    m = re.match(r"^(https?://image\.tmdb\.org/t/p/)[^/]+(/.+)$", url)
+    return (m.group(1) + "w342" + m.group(2)) if m else url
+
+
 def _fetch(url):
     from PIL import Image
-    req = urllib.request.Request(url, headers={"User-Agent": UA})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
-        data = r.read(MAX_BYTES + 1)
+    src = _smaller(url)
+    try:
+        req = urllib.request.Request(src, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            data = r.read(MAX_BYTES + 1)
+    except Exception:
+        if src == url:
+            raise
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            data = r.read(MAX_BYTES + 1)
     if len(data) > MAX_BYTES:
         raise ValueError("too big")
     im = Image.open(io.BytesIO(data))
@@ -115,15 +136,19 @@ def _worker():
     global version
     n = 0
     while True:
-        u = _q.get()
+        prio, _s, u = _q.get()
         try:
-            _fetch(u)
-            version += 1
+            if not has_poster(u):          # a duplicate entry may be done already
+                _fetch(u)
+                version += 1
         except Exception:
             _failed[u] = time.time()
         finally:
             with _lock:
-                _pending.discard(u)
+                if _pending.get(u) == prio:
+                    _pending.pop(u, None)
+        if prio:                           # pre-caching: be gentle
+            time.sleep(0.05)
         n += 1
         if n % 100 == 0:
             _prune()

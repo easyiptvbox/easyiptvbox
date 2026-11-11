@@ -79,7 +79,8 @@ colored square is used.</p>
 <ul>
  <li><b>UP / DOWN</b>: previous / next channel.</li>
  <li><b>LEFT / RIGHT</b>: jump 30 seconds back / forward (within what the box has buffered).</li>
- <li><b>OK</b>: pause / resume.</li>
+ <li><b>OK</b>: pause and show the <b>TV guide</b> for the channel (the next hours, with the programme on now in green, when the
+  guide has data for it). Press OK again to resume.</li>
  <li><b>MENU</b> in a channel list shows channel pictures; choose to refresh all or only old/missing ones.</li>
 </ul>
 <h3>Movies and series</h3>
@@ -121,6 +122,11 @@ Without it VLC opens but shows an error. If VLC isn't listed, open the VLC app o
   provider lists are renewed, new matches are added to Movies and the saved search is removed.</li>
  <li>Searches use the box's copy of the provider list, renewed every
   &ldquo;Provider lists refresh every (hours)&rdquo; (see <a href="#epg">TV guide</a>).</li>
+ <li><b>Movie folders</b> (Settings &gt; Movie folders): <b>Browse all movie categories</b> opens a page with every movie category
+  of your provider. Tap <b>Add</b> to put a whole category in Movies as a <b>folder</b>. On the TV the folders come first
+  (with a collage of their first pictures and the number of movies); OK opens a folder and shows all its movies, Back or Left
+  returns. New movies the provider adds to the category show up by themselves. The first pictures of every folder are
+  downloaded in the background, so they appear quickly; the rest are fetched as you scroll.</li>
 </ul>
 </section>
 

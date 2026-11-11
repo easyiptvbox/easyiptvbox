@@ -104,6 +104,9 @@ the changes per week (also linked from Settings).
    - **Profiles**: with extra profiles created (Settings > Manage profiles) the menu lists
      the current profile above the QR code; OK on it opens a list to switch
      profile, and PIN-protected profiles ask for a PIN on the TV.
+   - **Movie folders**: Settings > Movie folders adds a whole provider movie category
+     to Movies as a folder (collage tile); OK opens it. Pictures of each folder are
+     pre-downloaded in the background.
    - **Movies / Series**: a **poster grid** (pictures supplied by your
      provider, cached in `app/cache/posters`; items without a picture
      show their title).

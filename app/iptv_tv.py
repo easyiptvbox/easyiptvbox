@@ -32,10 +32,12 @@ import iptv_thumbs
 import iptv_posters
 import iptv_livepics
 import iptv_profiles
+import iptv_config
 import iptv_net
 import iptv_stream
 
 # screens that must never be seen in simple mode: it falls back to the channel
+FOLDER_PRECACHE = 150          # posters pre-downloaded per movie folder
 SIMPLE_FALLBACK = ("playlists", "channels", "series", "seasons", "episodes",
                    "loading", "resume")
 MENU_SCREENS = ("playlists", "channels", "series")   # screens with the left menu
@@ -147,6 +149,12 @@ class App:
         self._ox = 0               # left offset of the content (menu width)
         self.menu_focus = False    # keyboard focus is in the left menu
         self.menu_prof = None      # 0 = the profile row in the menu is highlighted
+        self.folder_root = None    # Movies playlist while a movie folder is open
+        self._folder_index = 0     # position of the open folder in the Movies list
+        self._folder_loading = None   # name of the folder being loaded
+        self._folder_info = {}     # folder key -> {"count", "preview": [poster urls]}
+        self._folder_busy = False
+        self._folder_again = False
         self.prof_sel = 0          # selected row in the profile list
         self._epg_lock = threading.Lock()
         self._epg_busy = False
@@ -417,6 +425,42 @@ class App:
         finally:
             iptv_profiles.set_request(prev)
         return out
+
+    def _precache_folders(self):
+        """In the background: for every Movies folder, work out the preview
+        posters of its tile and queue its first posters for download at low
+        priority (never ahead of what is on screen). Runs one job at a time."""
+        with self._epg_lock:
+            if self._folder_busy:
+                self._folder_again = True
+                return
+            self._folder_busy = True
+
+        def work():
+            while True:
+                self._folder_again = False
+                try:
+                    prov = self.cfg._data.get("provider") or {}
+                    for pl in list(self.cfg.playlists):
+                        if not pl.is_movies:
+                            continue
+                        for fo in list(pl.folders):
+                            items = iptv_config.movies_in_category(
+                                fo.get("id", ""), fo.get("name", ""), prov)
+                            urls = [m["logo"] for m in items
+                                    if m["logo"].startswith("http")]
+                            self._folder_info[self._folder_key(fo)] = {
+                                "count": len(items), "preview": urls[:4]}
+                            iptv_posters.request(urls[:4])            # tile collage
+                            iptv_posters.request(urls[:FOLDER_PRECACHE], low=True)
+                            self._last_sig = None
+                except Exception as e:
+                    print("folder pre-cache failed: %s" % e, flush=True)
+                with self._epg_lock:
+                    if not self._folder_again:
+                        self._folder_busy = False
+                        return
+        threading.Thread(target=work, daemon=True).start()
 
     def _schedule_epg_rebuild(self, force=False):
         """Rebuild the automatic TV-guide mapping in the background.
@@ -820,6 +864,7 @@ class App:
         self._last_sig = None
 
         self._schedule_epg_rebuild()      # guide covers every profile's channels
+        self._precache_folders()
 
     PIN_KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "<", "0", "OK"]
 
@@ -881,7 +926,92 @@ class App:
             self.live_sel = r
             self.pl_index = cats[r]
 
+    # -- movie folders (provider movie categories shown as folders) -----------
+    @staticmethod
+    def _folder_key(fo):
+        return str(fo.get("id") or fo.get("name") or "")
+
+    def _open_folder(self, fo):
+        """Load the category's movies in the background, then show them."""
+        root = self.current_playlist
+        self._folder_loading = fo.get("name") or "folder"
+        self._folder_index = self.ch_index
+        prov = self.cfg._data.get("provider") or {}
+
+        def work():
+            try:
+                items = iptv_config.movies_in_category(fo.get("id", ""),
+                                                       fo.get("name", ""), prov)
+            except Exception:
+                items = []
+            self._folder_result = (fo, root, items)
+            self.remote.q.put("__folder_loaded__")
+        threading.Thread(target=work, daemon=True).start()
+
+    def _folder_loaded(self):
+        res = getattr(self, "_folder_result", None)
+        if not res or self._folder_loading is None:
+            return                       # cancelled while loading
+        fo, root, items = res
+        self._folder_loading = None
+        from iptv_config import Playlist, Channel
+        pl = Playlist(fo.get("name") or "Folder", is_movies=True)
+        pl.channels = [Channel(m["name"], m["url"], m["logo"]) for m in items
+                       if m.get("url")]
+        pl.folder_of = root
+        self.folder_root = root
+        self.current_playlist = pl
+        self.ch_index = 0
+        self.screen_state = SCREEN_CHANNELS
+        self._last_sig = None
+
+    def _close_folder(self):
+        root = self.folder_root
+        if root is not None:
+            self.current_playlist = root
+            self.ch_index = max(0, min(self._folder_index,
+                                       len(root.folders) + len(root.channels) - 1))
+        self.folder_root = None
+        self._last_sig = None
+
+    def _act_movies(self, a):
+        """Movies page: folders first, then single movies; OK on a folder
+        opens it, Back / Left on the first column goes up one level."""
+        pl = self.current_playlist
+        if self._folder_loading:
+            if a in (ir.BACK, ir.LEFT, ir.HOME):
+                self._folder_loading = None
+            return
+        inside = self.folder_root is not None
+        nf = 0 if inside else len(pl.folders)
+        n = nf + len(pl.channels)
+        if n == 0:
+            if a in (ir.BACK, ir.LEFT):
+                if inside:
+                    self._close_folder()
+                else:
+                    self.menu_focus = True
+            return
+        self.ch_index = min(self.ch_index, n - 1)
+        r = self._poster_nav(a, self.ch_index, n)
+        if r is None:
+            if inside:
+                self._close_folder()
+            else:
+                self.menu_focus = True
+        elif r == "ok":
+            if self.ch_index < nf:
+                self._open_folder(pl.folders[self.ch_index])
+            else:
+                self._grid_play = None
+                self.play_channel(self.ch_index - nf)
+        else:
+            self.ch_index = r
+
     def _act_channels(self, a):
+        if self.current_playlist.is_movies:
+            self._act_movies(a)
+            return
         chans = self.current_playlist.channels
         n = len(chans)
         if n == 0:
@@ -890,16 +1020,6 @@ class App:
                     self.menu_focus = True
                 else:
                     self.screen_state = SCREEN_PLAYLISTS
-            return
-        if self.current_playlist.is_movies:
-            r = self._poster_nav(a, self.ch_index, n)
-            if r is None:
-                self.menu_focus = True
-            elif r == "ok":
-                self._grid_play = None
-                self.play_channel(self.ch_index)
-            else:
-                self.ch_index = r
             return
         # The scan-choice prompt takes priority when open.
         if self.scan_menu:
@@ -1160,13 +1280,58 @@ class App:
                 self.ch_index = (self.ch_index + step) % len(chans)
             self.play_channel(self.ch_index)
         elif a == ir.OK:
-            self.player.toggle_pause()
+            self._live_toggle_pause()
         elif a == ir.RIGHT:
-            self.player.set_property("pause", False)
+            self._live_resume()
             self.player.seek_relative(30)
         elif a == ir.LEFT:
-            self.player.set_property("pause", False)
+            self._live_resume()
             self.player.seek_relative(-30)
+
+    # -- live TV: pause shows the TV guide -------------------------------
+    def _live_toggle_pause(self):
+        """OK pauses the channel and shows the guide for the next hours; OK
+        again resumes."""
+        if getattr(self, "_live_paused", False):
+            self._live_resume()
+        else:
+            self._live_paused = True
+            self.player.set_property("pause", True)
+            self._show_guide()
+
+    def _live_resume(self):
+        self._live_paused = False
+        self.player.set_property("pause", False)
+        self.player.osd_clear()
+
+    def _guide_ass(self, ch, rows):
+        """ASS text for the guide panel (top left, over the paused picture)."""
+        head = (r"{\an7}{\pos(70,50)}{\bord3}{\shad0}{\1c&HFFFFFF&}"
+                r"{\3c&H000000&}{\fs46}{\b1}%s{\b0}" % self._ass_escape(ch.name))
+        lines = [head, r"{\fs30}{\1c&HA0A0A0&}TV guide"]
+        if not rows:
+            lines.append(r"{\fs36}{\1c&HFFFFFF&}No TV guide for this channel")
+        for start, _stop, title, is_now in rows:
+            hhmm = time.strftime("%H:%M", time.localtime(start))
+            title = " ".join(str(title).split())
+            if len(title) > 48:
+                title = title[:47].rstrip() + "\u2026"
+            col = r"{\1c&H4CC85A&}" if is_now else r"{\1c&HFFFFFF&}"
+            lines.append(r"{\fs36}%s%s  %s%s" % (
+                col, hhmm, self._ass_escape(title),
+                "   (now)" if is_now else ""))
+        lines.append(r"{\fs28}{\1c&HA0A0A0&}Press OK to continue")
+        return r"\N".join(lines)
+
+    def _show_guide(self):
+        ch = self.current_channel
+        if ch is None:
+            return
+        try:
+            rows = self.epg.upcoming(ch.tvg_id, ch.name, hours=8, limit=9)
+        except Exception:
+            rows = []
+        self.player.osd_show(self._guide_ass(ch, rows))
 
     # -- movie playback controls (OSD menu drawn by mpv) ----------------
     def _act_movie(self, a):
@@ -1836,12 +2001,15 @@ class App:
         # rebuild the automatic EPG mapping only if the channels changed
         # (single background job, never several at once)
         self._schedule_epg_rebuild()
+        self._precache_folders()
 
     def open_playlist(self, idx):
         # Stop any thumbnail scan from the previous category so it doesn't keep
         # running in the background (and block the new category's scan).
         self.thumbs.stop()
         self.current_playlist = self.cfg.playlists[idx]
+        self.folder_root = None
+        self._folder_loading = None
         self._grid_play = None
         self.ch_index = 0
         self.show_thumbs = self._is_live_category()   # live: picture grid
@@ -2118,7 +2286,8 @@ class App:
                 if c.url == url:
                     self.pl_index = pi
                     self.current_playlist = pl
-                    self.ch_index = ci
+                    self.folder_root = None
+                    self.ch_index = ci + (len(pl.folders) if pl.is_movies else 0)
                     self._grid_play = None
                     self.show_thumbs = not pl.is_movies
                     self.section = "movies" if pl.is_movies else "live"
@@ -2174,6 +2343,7 @@ class App:
 
     def _launch(self, url, **kwargs):
         """Show a loading screen, release DRM, then start mpv."""
+        self._live_paused = False
         self._crop_done = False
         self._crop_tries = 0
         self._subname_done = False
@@ -2200,11 +2370,15 @@ class App:
 
     def _move_watched_first(self):
         """What you start watching moves to the top of its list (the movie, or
-        the series an episode belongs to)."""
+        the series an episode belongs to). A movie opened from a folder moves
+        to the top of the saved Movies list only if it is saved there."""
         pl = self.current_playlist
         try:
             if pl is not None and pl.is_movies and self.current_channel:
-                kind, key, items = "movies", self.current_channel.url, pl.channels
+                kind, key = "movies", self.current_channel.url
+                root = getattr(pl, "folder_of", None)
+                target = root or pl
+                items = target.channels
                 pos = next((i for i, c in enumerate(items) if c.url == key), -1)
             elif pl is not None and getattr(pl, "is_series", False) \
                     and self.current_series:
@@ -2212,6 +2386,7 @@ class App:
                 items = pl.series
                 pos = next((i for i, s in enumerate(items)
                             if str(s["series_id"]) == key), -1)
+                root = None
             else:
                 return
             if pos <= 0:
@@ -2219,7 +2394,8 @@ class App:
             if iptv_profiles.move_to_top(kind, key, iptv_profiles.ACTIVE):
                 items.insert(0, items.pop(pos))      # keep the TV's list in step
                 if kind == "movies":
-                    self.ch_index = 0
+                    if root is None:                 # on the Movies page itself
+                        self.ch_index = len(pl.folders)   # folders come first
                 else:
                     self.series_index = 0
         except Exception as e:
@@ -2446,6 +2622,35 @@ class App:
             self.surface.blit(t, (x + (w - t.get_width()) // 2, yy))
             yy += lh
 
+    def _draw_folder_tile(self, tile, name, extra):
+        """A movie folder: a 2x2 collage of its first posters (or a folder
+        icon until they are downloaded), with the movie count."""
+        x, y, w, h = tile
+        pygame.draw.rect(self.surface, TILE_BG, tile, border_radius=8)
+        shown = 0
+        hw, hh = w // 2, (h - int(h * 0.16)) // 2
+        for i, url in enumerate((extra.get("preview") or [])[:4]):
+            s = self._poster_surface(url, hw - 2, hh - 2, True)
+            if s is not None:
+                self.surface.blit(s, (x + (i % 2) * hw + 1, y + (i // 2) * hh + 1))
+                shown += 1
+        if not shown:                       # folder icon
+            fw, fh = int(w * 0.5), int(h * 0.34)
+            fx, fy = x + (w - fw) // 2, y + int(h * 0.22)
+            col = (200, 160, 60)
+            pygame.draw.rect(self.surface, col, (fx, fy - fh // 6, fw // 2, fh // 4),
+                             border_radius=6)
+            pygame.draw.rect(self.surface, col, (fx, fy, fw, fh), border_radius=8)
+        # strip with the count along the bottom of the tile
+        strip = int(h * 0.16)
+        pygame.draw.rect(self.surface, (0, 0, 0), (x, y + h - strip, w, strip),
+                         border_bottom_left_radius=8, border_bottom_right_radius=8)
+        cnt = extra.get("count")
+        label = ("%d movies" % cnt) if cnt else "Folder"
+        s = self._fit(self.f_grid_label, label, (230, 200, 120), w - 12)
+        self.surface.blit(s, (x + (w - s.get_width()) // 2,
+                              y + h - strip + (strip - s.get_height()) // 2))
+
     def _draw_poster_grid(self, title, n, get, sel, hint, empty="Nothing here.",
                           cols=6, rows=2, aspect=2 / 3, colored=False,
                           cover=False, focused=True, subtitle=""):
@@ -2485,11 +2690,16 @@ class App:
         sel = max(0, min(sel, n - 1))
         start = (sel // per_page) * per_page
         page = [get(k) for k in range(start, min(n, start + per_page))]
-        # download this page and the next one in the background
-        iptv_posters.request([get(k)[1] for k in
-                              range(start, min(n, start + per_page * 2))
-                              if get(k)[1].startswith("http")])
-        for rel, (name, logo, watched) in enumerate(page):
+        # download this page (first) and the next three in the background
+        ahead = [get(k) for k in range(start, min(n, start + per_page * 4))]
+        urls = [e[1] for e in ahead if e[1].startswith("http")]
+        for e in ahead:
+            if len(e) > 3 and e[3] and e[3].get("preview"):
+                urls.extend(e[3]["preview"])
+        iptv_posters.request(urls)
+        for rel, entry in enumerate(page):
+            name, logo, watched = entry[:3]
+            extra = entry[3] if len(entry) > 3 else None
             pos = start + rel
             x = left + (rel % cols) * (img_w + gap)
             y = top + (rel // cols) * (cell_h + vgap)
@@ -2498,6 +2708,12 @@ class App:
                              (x - 4, y - 4, img_w + 8, img_h + label_h + 8),
                              border_radius=10)
             tile = pygame.Rect(x, y, img_w, img_h)
+            if extra and extra.get("folder"):
+                self._draw_folder_tile(tile, name, extra)
+                col = SELECT_TEXT if is_sel else TEXT
+                t = self._fit(self.f_grid_label, name, col, img_w - 4)
+                self.surface.blit(t, (x + 2, y + img_h + 4))
+                continue
             surf = self._poster_surface(logo, img_w, img_h, cover)
             if surf is not None:
                 self.surface.blit(surf, (x + (img_w - surf.get_width()) // 2,
@@ -2913,8 +3129,12 @@ class App:
                 counts[sec] = ""
                 continue
             pl = self.cfg.playlists[pi]
-            k = len(pl.series) if sec == "series" else len(pl.channels)
-            counts[sec] = "%d %s" % (k, sec) if k else "empty"
+            if sec == "movies" and pl.folders:
+                counts[sec] = "%d folders, %d %s" % (len(pl.folders),
+                                                     len(pl.channels), sec)
+            else:
+                k = len(pl.series) if sec == "series" else len(pl.channels)
+                counts[sec] = "%d %s" % (k, sec) if k else "empty"
         for sec in SECTIONS:
             cur = (sec == self.section)
             focus = cur and self.menu_focus
@@ -3155,12 +3375,34 @@ class App:
     def _draw_channels_list(self):
         chans = self.current_playlist.channels
         if self.current_playlist.is_movies:
+            pl = self.current_playlist
+            inside = self.folder_root is not None
+            folders = [] if inside else pl.folders
+            nf = len(folders)
+            if self._folder_loading:
+                self._draw_header(self._folder_loading, font=self.f_grid_header)
+                msg = self.f_item.render("Loading the movies...", True, DIM)
+                self.surface.blit(msg, (self._ox + int(self.W * 0.03),
+                                        int(self.H * 0.4)))
+                self._draw_hint("Back to cancel")
+                return
+
+            def get(k):
+                if k < nf:
+                    fo = folders[k]
+                    info = self._folder_info.get(self._folder_key(fo), {})
+                    return (fo.get("name", "Folder"), "", False,
+                            {"folder": True, "count": info.get("count"),
+                             "preview": info.get("preview") or []})
+                c = chans[k - nf]
+                return (c.name, c.logo, self.movies.is_watched(c.url))
             self._draw_poster_grid(
-                "", len(chans),
-                lambda k: (chans[k].name, chans[k].logo,
-                           self.movies.is_watched(chans[k].url)),
-                self.ch_index, "OK to watch  -  Left for menu",
-                empty="No movies added yet.", focused=not self.menu_focus)
+                pl.name if inside else "", nf + len(chans), get,
+                self.ch_index,
+                "OK to watch  -  Back for the folders" if inside
+                else "OK to watch  -  Left for menu",
+                empty="No movies in this folder." if inside
+                else "No movies added yet.", focused=not self.menu_focus)
             return
         self._draw_header(self.current_playlist.display_name)
         top = int(self.H * 0.18)
@@ -3350,6 +3592,7 @@ class App:
 
         self.remote.start()
         self.start_epg_thread()
+        threading.Timer(8.0, self._precache_folders).start()   # movie folder posters
         self.start_provider_refresh_thread()
         self.start_network_optimizer_thread()
         # streaming to other devices: stop the TV when a device starts, and
@@ -3436,6 +3679,8 @@ class App:
                     else:
                         self.thumbs.stop()
                     self.notify("Playing on another device", 8)
+                elif a == "__folder_loaded__":
+                    self._folder_loaded()
                 elif a == "__scan_web__":
                     # the web app's Play tab shows a live category: scan its
                     # pictures, but only while the TV itself is idle

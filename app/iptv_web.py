@@ -643,6 +643,21 @@ class ControlServer:
                     self._handle_provider_search()
                 elif path == "/api/provider/categories":
                     self._handle_provider_categories()
+                elif path == "/api/provider/movie-categories":
+                    from iptv_config import movie_categories
+                    prov = self._read_provider()
+                    if not prov.get("enabled"):
+                        self._send(400, {"error": "Enter your provider URL/username/"
+                                         "password first (Settings > IPTV provider)."})
+                        return
+                    cats = movie_categories(prov)
+                    if not cats:
+                        self._send(200, {"count": 0, "categories": [],
+                                         "hint": "No movie list yet. Search for a "
+                                                 "movie once, or wait for the "
+                                                 "box to load the provider lists."})
+                        return
+                    self._send(200, {"count": len(cats), "categories": cats})
                 elif path == "/api/provider/movies":
                     self._handle_provider_movies()
                 elif path == "/api/provider/series":
@@ -1172,6 +1187,16 @@ def build_config_yaml(data):
         is_movies = bool(p.get("is_movies"))
         if is_movies:
             entry["is_movies"] = True
+            folders = []
+            for fo in (p.get("folders") or []):
+                if not isinstance(fo, dict):
+                    continue
+                fid, fname = s(fo.get("id", "")).strip(), s(fo.get("name", "")).strip()
+                if (fid or fname) and not any(x["id"] == fid and x["name"] == fname
+                                              for x in folders):
+                    folders.append({"id": fid, "name": fname})
+            if folders:
+                entry["folders"] = folders
         # A fixed "Series" category holds a list of series references.
         is_series = bool(p.get("is_series"))
         if is_series:
@@ -1559,6 +1584,26 @@ PAGE = r"""<!DOCTYPE html>
       <div id="seriesWatches"></div>
       <div style="color:var(--dim);font-size:.8rem;margin:.9rem 0 .3rem">Added series</div>
       <div id="seriesAdded"></div>
+    </div>
+
+    <div class="card" id="mfCard">
+      <h2>Movie folders</h2>
+      <div class="pnote" style="margin-top:0">Add a whole movie category from your provider as a folder in
+        <b>Movies</b> on the TV. Opening the folder there shows all the movies in that category. New movies the provider adds
+        to the category show up by themselves.</div>
+      <button class="ghost" id="mfBrowse" style="width:100%;margin-top:.6rem">Browse all movie categories</button>
+      <div style="color:var(--dim);font-size:.8rem;margin:.9rem 0 .3rem">Folders in Movies</div>
+      <div id="mfList"></div>
+      <div id="mfMsg" class="pnote" style="min-height:1.2em"></div>
+    </div>
+
+    <div id="mfPage" style="display:none;position:fixed;inset:0;z-index:70;background:var(--bg);overflow-y:auto;padding:.8rem">
+      <div style="display:flex;gap:.5rem;align-items:center;position:sticky;top:0;background:var(--bg);padding-bottom:.5rem;z-index:2">
+        <button class="ghost" id="mfBack" style="flex:0 0 auto;width:auto;margin:0;padding:.5rem .9rem">&larr; Back</button>
+        <input type="text" id="mfFilter" placeholder="Filter movie categories" autocomplete="off" style="margin:0">
+      </div>
+      <div id="mfInfo" class="pnote"></div>
+      <div id="mfCats"></div>
     </div>
 
     <div class="card" id="catCard">
@@ -1968,7 +2013,51 @@ function renderCatsAdded(){
     box.appendChild(wrap);
   });
 }
-function renderAdded(){renderMoviesAdded();renderSeriesAdded();renderCatsAdded();}
+// ---- Movie folders (provider movie categories shown as folders in Movies) ----
+function mfList(){ const m=moviesPl(); m.folders=m.folders||[]; return m.folders; }
+function mfHas(c){ return mfList().some(f=>(c.id&&f.id===c.id)||(!c.id&&f.name===c.name)); }
+function renderFolders(){
+  const box=$('mfList'); if(!box) return; box.innerHTML='';
+  const fl=mfList();
+  if(!fl.length){ box.innerHTML='<div style="color:var(--dim);font-size:.85rem">None yet.</div>'; return; }
+  fl.forEach((f,i)=>{
+    const row=document.createElement('div'); row.className='sr';
+    const t=document.createElement('div'); t.className='nm'; t.textContent='\uD83D\uDCC1 '+f.name;
+    const rm=document.createElement('button'); rm.className='del'; rm.textContent='Remove';
+    rm.onclick=()=>{ fl.splice(i,1); renderFolders(); if($('mfPage').style.display!=='none') mfRenderCats(); };
+    row.appendChild(t); row.appendChild(rm); box.appendChild(row);
+  });
+}
+let MFCATS=[];
+function mfRenderCats(){
+  const q=$('mfFilter').value.trim().toLowerCase(), box=$('mfCats'); box.innerHTML='';
+  const hits=MFCATS.filter(c=>!q||c.name.toLowerCase().includes(q));
+  hits.slice(0,300).forEach(c=>{
+    const row=document.createElement('div'); row.className='sr'; row.style.margin='.35rem 0';
+    const t=document.createElement('div'); t.className='nm'; t.textContent=c.name+'  ('+c.count+')';
+    const b=document.createElement('button'); b.className='add'; b.style.cssText='flex:0 0 auto;width:auto;padding:.4rem .8rem;margin:0';
+    if(mfHas(c)){ b.textContent='\u2713 Added'; b.classList.add('done'); b.disabled=true; }
+    else{ b.textContent='Add'; b.onclick=()=>{ mfList().unshift({id:c.id,name:c.name}); renderFolders(); mfRenderCats(); }; }
+    row.appendChild(t); row.appendChild(b); box.appendChild(row);
+  });
+  if(hits.length>300){ const m=document.createElement('div'); m.className='pnote'; m.textContent='Showing 300 of '+hits.length+' - type in the filter to narrow it down.'; box.appendChild(m); }
+  if(!hits.length) box.innerHTML='<div style="color:var(--dim)">No categories found.</div>';
+}
+async function mfOpen(){
+  $('mfPage').style.display=''; document.body.style.overflow='hidden';
+  $('mfFilter').value=''; $('mfInfo').textContent='Loading\u2026'; $('mfCats').innerHTML='';
+  try{
+    const r=await fetch('/api/provider/movie-categories'); const d=await r.json();
+    if(!r.ok){ $('mfInfo').textContent=d.error||'Could not load the categories.'; return; }
+    MFCATS=d.categories||[];
+    $('mfInfo').textContent=MFCATS.length?(MFCATS.length+' movie categories. Tap Add to put one in Movies as a folder.'):(d.hint||'No movie categories yet.');
+    mfRenderCats();
+  }catch(e){ $('mfInfo').textContent='Could not reach the box.'; }
+}
+function mfClose(){ $('mfPage').style.display='none'; document.body.style.overflow=''; }
+$('mfBrowse').onclick=mfOpen; $('mfBack').onclick=mfClose; $('mfFilter').oninput=mfRenderCats;
+
+function renderAdded(){renderMoviesAdded();renderSeriesAdded();renderCatsAdded();renderFolders();}
 
 // re-mark search result buttons as Added/Add after a change
 function refreshSearchButtons(){

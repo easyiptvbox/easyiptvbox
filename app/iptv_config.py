@@ -39,6 +39,8 @@ class Playlist:
         self.is_movies = is_movies
         self.is_series = is_series
         self.series = []   # for a Series category: [{series_id, name, logo}]
+        self.folders = []  # for Movies: provider movie categories shown as folders [{id, name}]
+        self.folder_of = None  # set on a temporary playlist that is an opened folder
 
     @property
     def display_name(self):
@@ -96,6 +98,12 @@ class Config:
                           is_movies=bool(p.get("is_movies")),
                           is_series=bool(p.get("is_series")),
                           alias=str(p.get("alias", "")))
+            # The Movies category can hold provider movie categories as folders.
+            if pl.is_movies:
+                for fo in (p.get("folders") or []):
+                    if isinstance(fo, dict) and (fo.get("id") or fo.get("name")):
+                        pl.folders.append({"id": str(fo.get("id", "")),
+                                           "name": str(fo.get("name", ""))})
             # A Series category carries a list of series references.
             if pl.is_series:
                 for se in (p.get("series") or []):
@@ -401,6 +409,61 @@ def cached_provider_movies(prov):
     """Movies from cache only. Returns [] if there is no cache yet."""
     data = _read_cache_file("provider_movies.json")
     return data if data is not None else []
+
+
+_mcat_cache = {"mtime": None, "cats": [], "open": {}}
+
+
+def _movies_mtime():
+    try:
+        return os.path.getmtime(_cache_path("provider_movies.json"))
+    except OSError:
+        return None
+
+
+def movie_categories(prov=None):
+    """[{id, name, count}] of the provider's movie categories (cache only),
+    sorted by name. Rebuilt only when the movie list changes."""
+    mt = _movies_mtime()
+    if mt is not None and _mcat_cache["mtime"] == mt and _mcat_cache["cats"]:
+        return _mcat_cache["cats"]
+    by = {}
+    for m in cached_provider_movies(prov):
+        key = (str(m.get("category_id", "")), str(m.get("group", "")))
+        by[key] = by.get(key, 0) + 1
+    cats = [{"id": cid, "name": name, "count": n} for (cid, name), n in by.items()]
+    cats.sort(key=lambda x: x["name"].lower())
+    _mcat_cache.update(mtime=mt, cats=cats, open={})
+    return cats
+
+
+def _clean_movie_title(n):
+    import re
+    return re.sub(r"^[0-9A-Z\-\| ]{0,10}-\s*", "", str(n)).strip() or str(n)
+
+
+def movies_in_category(cat_id, name="", prov=None):
+    """The movies of one provider category as [{name, url, logo}], in the
+    provider's order. Loaded from the movie cache (about 0.3 s for 160 000
+    movies) and remembered for the last few folders."""
+    mt = _movies_mtime()
+    if _mcat_cache["mtime"] != mt:
+        _mcat_cache.update(mtime=mt, cats=[], open={})
+    key = str(cat_id) or ("name:" + name)
+    hit = _mcat_cache["open"].get(key)
+    if hit is not None:
+        return hit
+    out = []
+    for m in cached_provider_movies(prov):
+        if (str(cat_id) and str(m.get("category_id", "")) == str(cat_id)) or \
+                (not str(cat_id) and name and m.get("group") == name):
+            out.append({"name": _clean_movie_title(m.get("name", "")),
+                        "url": str(m.get("url", "")),
+                        "logo": str(m.get("logo", ""))})
+    if len(_mcat_cache["open"]) >= 4:
+        _mcat_cache["open"].pop(next(iter(_mcat_cache["open"])))
+    _mcat_cache["open"][key] = out
+    return out
 
 
 def cached_provider_series(prov):
@@ -754,6 +817,25 @@ class EPG:
                 nxt = (start, stop, title)
                 break
         return (cur, nxt)
+
+    def upcoming(self, tvg_id, name="", hours=8, limit=9):
+        """Programmes from now until `hours` ahead: [(start, stop, title,
+        is_now)], at most `limit`. Empty when the guide has nothing."""
+        cid = self._resolve(tvg_id, name)
+        if not cid or cid not in self.programmes:
+            return []
+        now = time.time()
+        end = now + hours * 3600
+        out = []
+        for start, stop, title in self.programmes[cid]:
+            if stop <= now:
+                continue
+            if start >= end:
+                break
+            out.append((start, stop, title, start <= now))
+            if len(out) >= limit:
+                break
+        return out
 
 
 def calendar_timegm(st):

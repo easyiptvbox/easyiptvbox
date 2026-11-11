@@ -5,6 +5,8 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 26 October 2026
 
 **New**
+- **Movie folders**: Settings > Movie folders > Browse all movie categories adds a whole provider movie category to Movies as a folder (issue #13). On the TV the folders come first, shown as a collage of their first posters with the number of movies; OK opens the folder and shows all the movies in that category. The first 150 posters of every folder are downloaded in the background (low priority, and from a smaller picture size), the pictures you scroll to are fetched first.
+- **TV guide while paused** (issue #11): on a live channel, OK now pauses and shows the guide for the next hours (the programme on now in green); OK again resumes.
 - Newly added movies and series (in the web app, or found by a saved search) now go to the top of their list, and a movie or an episode you start watching moves to the top too (issue #8).
 - **Simple mode** (Settings > Simple mode): for someone who just wants to watch TV. The box boots straight onto a channel you picked (from several categories, in your order) and every remote button except volume and mute switches channel: Left goes to the previous one, all others to the next. Your changes only take effect after you press **Apply**, and turning it on shows a warning with how to switch it off again. It remembers the last channel, skips channels that don't work, and the power button still works.
 - **TCP mode** for remote access (Settings > Remote access): a second way to reach the box from networks that block WireGuard. It uses VLESS + Reality (sing-box) on a TCP port you choose (default 8443), works with the sing-box, Hiddify and v2rayNG apps, only reaches the box, and is off until you turn it on.

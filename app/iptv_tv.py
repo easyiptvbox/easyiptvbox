@@ -2051,8 +2051,9 @@ class App:
         """The list as the viewer sees it: every channel / movie is one item,
         and all episodes of one added season together are one item."""
         groups = []
+        key = lambda c: ":".join(c.gid.split(":")[:2]) if c.gid else ""
         for i, c in enumerate(self._simple_chans()):
-            if groups and c.gid and self._simple_chans()[groups[-1][0]].gid == c.gid:
+            if groups and key(c) and key(self._simple_chans()[groups[-1][0]]) == key(c):
                 groups[-1].append(i)
             else:
                 groups.append([i])
@@ -2171,7 +2172,6 @@ class App:
         ended = bool(last and last[0] == url and last[2]
                      and last[1] >= last[2] - 120)
         n = len(self._simple_chans())
-        chans = self._simple_chans()
         if ended:
             self.movies.mark_watched(url)
             self.movies.clear_position(url)
@@ -2181,10 +2181,10 @@ class App:
         self.movie_menu = None
         if ended:
             nxt = (self.ch_index + 1) % n
-            if not (chans[self.ch_index].gid
-                    and chans[nxt].gid == chans[self.ch_index].gid
-                    and nxt > self.ch_index):
-                # season finished (or a single movie): next item of the list
+            if not (nxt > self.ch_index and
+                    nxt in self._simple_groups()[
+                        self._simple_group_no(self.ch_index)]):
+                # series finished (or a single movie): next item of the list
                 nxt = self._simple_entry(
                     self._simple_group_no(self.ch_index) + 1)
             self._simple_start(nxt)

@@ -164,8 +164,9 @@ straight on a channel, with no menus.</p>
  <li>You can also add <b>movies</b> (from the ones saved under Movies) and whole <b>seasons</b> of series (Add channels, movies or
   seasons &gt; Series &gt; Seasons). They sit in the same list and the same buttons apply (no pause). A movie or episode
   <b>continues where you stopped</b> without asking, and only its title is shown for a moment. When it ends, <b>the next item in
-  the list starts by itself</b>; after the last item the list starts over. All episodes of an added season count as <b>one item</b>: the buttons jump to the next or previous channel / movie / season,
-  while the episodes inside a season follow each other by themselves (a season continues with the episode you were on).</li>
+  the list starts by itself</b>; after the last item the list starts over. All seasons of one series count as <b>one item</b>: the buttons jump to the next or previous channel / movie / series,
+  while the episodes follow each other by themselves, and the next season starts only after the last episode of the previous one.
+  A series continues with the episode you were on.</li>
  <li>After a restart the box continues on the channel (or movie / episode) that was playing last.</li>
  <li>The <b>power button</b> still opens the Standby / Power off prompt, Wi-Fi setup and so on.</li>
  <li>A channel that does not work is retried and then skipped, so the picture never stays black for long.</li>

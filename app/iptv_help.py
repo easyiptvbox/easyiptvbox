@@ -136,6 +136,8 @@ Without it VLC opens but shows an error. If VLC isn't listed, open the VLC app o
 <section id="series"><h2>TV series</h2>
 <p>Works like Movies: search, then <b>Add</b> (saved automatically). On the TV, open Series,
 pick a series, a season and an episode. &ldquo;Add future results automatically&rdquo; works here too.</p>
+<p>OK on a series (TV), or a tap on it in the Play tab, first shows a <b>fact sheet</b> (description, year, genre,
+rating, cast). On the TV, OK on the sheet opens the seasons.</p>
 </section>
 
 <section id="live"><h2>Live categories</h2>

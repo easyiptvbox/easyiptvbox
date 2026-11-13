@@ -35,11 +35,12 @@ import iptv_profiles
 import iptv_config
 import iptv_net
 import iptv_stream
+import iptv_movieinfo
 
 # screens that must never be seen in simple mode: it falls back to the channel
 FOLDER_PRECACHE = 150          # posters pre-downloaded per movie folder
 SIMPLE_FALLBACK = ("playlists", "channels", "series", "seasons", "episodes",
-                   "loading", "resume")
+                   "loading", "resume", "info")
 MENU_SCREENS = ("playlists", "channels", "series")   # screens with the left menu
 SECTIONS = ("movies", "live", "series")
 SECTION_LABELS = {"live": "Live", "movies": "Movies", "series": "Series"}
@@ -118,6 +119,7 @@ SCREEN_CHANNELS = "channels"
 SCREEN_PLAYING = "playing"
 SCREEN_POWER = "power"       # power prompt (Shutdown / Standby)
 SCREEN_STANDBY = "standby"   # black screen; any key wakes
+SCREEN_INFO = "info"         # movie fact sheet (plot, cast, rating) before playing
 SCREEN_RESUME = "resume"     # "Continue / Start over" prompt for a movie
 SCREEN_SERIES = "series"     # list of series in the Series category
 SCREEN_SEASONS = "seasons"   # seasons of a chosen series
@@ -152,6 +154,8 @@ class App:
         self.folder_root = None    # Movies playlist while a movie folder is open
         self._folder_index = 0     # position of the open folder in the Movies list
         self._folder_loading = None   # name of the folder being loaded
+        self._info = None             # movie fact sheet: {idx, channel, data}
+        self._info_ver = 0
         self._folder_info = {}     # folder key -> {"count", "preview": [poster urls]}
         self._folder_busy = False
         self._folder_again = False
@@ -551,10 +555,12 @@ class App:
             except Exception as e:
                 print("Provider limits check failed: %s" % e, flush=True)
             while True:
-                hours = max(1.0, float(getattr(self.cfg, "refresh_hours", 96)))
+                hours = max(8.0, float(getattr(self.cfg, "refresh_hours", 96)))
                 time.sleep(hours * 3600)
-                # wait until the TV is idle (not watching) before refreshing
-                while self.screen_state == SCREEN_PLAYING:
+                # wait until the box is idle (nobody watching on the TV or
+                # streaming to a phone) before refreshing
+                while (self.screen_state == SCREEN_PLAYING
+                       or iptv_stream.busy(grace=120)):
                     time.sleep(300)
                 prov_now = self.cfg._data.get("provider") or {}
                 if not prov_now.get("enabled"):
@@ -672,6 +678,8 @@ class App:
             self._act_episodes(a)
         elif self.screen_state == SCREEN_LOADING:
             self._act_loading(a)
+        elif self.screen_state == SCREEN_INFO:
+            self._act_info(a)
         elif self.screen_state == SCREEN_PLAYING:
             self._act_playing(a)
 
@@ -1003,10 +1011,121 @@ class App:
             if self.ch_index < nf:
                 self._open_folder(pl.folders[self.ch_index])
             else:
-                self._grid_play = None
-                self.play_channel(self.ch_index - nf)
+                self._open_info(self.ch_index - nf)
         else:
             self.ch_index = r
+
+    def _open_info(self, idx):
+        """OK on a movie: show its fact sheet first (play from there)."""
+        ch = self.current_playlist.channels[idx]
+        self._info = {"idx": idx, "channel": ch,
+                      "data": iptv_movieinfo.cached(ch.url)}
+        if ch.logo:
+            iptv_posters.request([ch.logo])
+        self.screen_state = SCREEN_INFO
+        self._last_sig = None
+        if self._info["data"] is None:
+            info = self._info
+            prov = self.cfg._data.get("provider") or {}
+
+            def work():
+                d = iptv_movieinfo.fetch(ch.url, ch.name, prov)
+                info["data"] = d
+                self._info_ver += 1
+            threading.Thread(target=work, daemon=True).start()
+
+    def _act_info(self, a):
+        info = self._info
+        if info is None:
+            self.screen_state = SCREEN_CHANNELS
+            return
+        if a == ir.OK:
+            self._grid_play = None
+            self.play_channel(info["idx"])
+            self._last_sig = None
+        elif a in (ir.BACK, ir.LEFT):
+            self.screen_state = SCREEN_CHANNELS
+            self._last_sig = None
+
+    def _draw_info(self):
+        info = self._info
+        if info is None:
+            return
+        ch, d = info["channel"], info["data"]
+        W, H = self.W, self.H
+        self._draw_header(ch.name)
+        m = int(W * 0.06)
+        top = int(H * 0.19)
+        ph = int(H * 0.58)
+        pw = int(ph * 2 / 3)
+        rect = pygame.Rect(m, top, pw, ph)
+        pygame.draw.rect(self.surface, TILE_BG, rect, border_radius=10)
+        surf = self._poster_surface(ch.logo, pw, ph)
+        if surf is not None:
+            self.surface.blit(surf, (m + (pw - surf.get_width()) // 2,
+                                     top + (ph - surf.get_height()) // 2))
+        x = m + pw + int(W * 0.035)
+        maxw = W - x - m
+        bottom = top + ph                # text stays beside the poster
+        y = top
+
+        def block(text, font, col, limit_y):
+            """Draw wrapped text, cut with ... when it would pass limit_y."""
+            nonlocal y
+            lines = self._wrap(font, text, maxw)
+            lh = font.get_linesize() + 2
+            room = max(0, int((limit_y - y) // lh))
+            if room < len(lines):
+                lines = lines[:room]
+                if lines:
+                    lines[-1] = lines[-1].rstrip(" .,;") + "\u2026"
+            for ln in lines:
+                self.surface.blit(font.render(ln, True, col), (x, y))
+                y += lh
+
+        if d is None:
+            block("Loading details...", self.f_small, DIM, bottom)
+        else:
+            meta = [str(d.get("year") or "")]
+            if d.get("runtime"):
+                h_, m_ = divmod(int(d["runtime"]), 60)
+                meta.append("%dh %02dmin" % (h_, m_) if h_ else "%d min" % m_)
+            if d.get("genre"):
+                meta.append(d["genre"])
+            meta = [p for p in meta if p]
+            if meta:
+                block("  -  ".join(meta), self.f_small, TEXT, bottom)
+            if d.get("rating"):
+                block("Rating %.1f / 10%s" % (d["rating"], " (%s)" % d["rating_src"]
+                                              if d.get("rating_src") else ""),
+                      self.f_small, ACCENT, bottom)
+            y += 8
+            # director / cast keep the space at the bottom; the plot gets the rest
+            extra = []
+            if d.get("director"):
+                extra.append("Director: " + d["director"])
+            if d.get("cast"):
+                extra.append("Cast: " + d["cast"])
+            lh_h = self.f_hint.get_linesize() + 2
+            need = 0
+            for e in extra:
+                need += min(3, len(self._wrap(self.f_hint, e, maxw))) * lh_h
+            plot_limit = bottom - need - (12 if extra else 0)
+            block(d.get("plot") or "No description available.", self.f_small,
+                  TEXT if d.get("plot") else DIM, plot_limit)
+            y = max(y, plot_limit) + 12 if extra else y
+            for e in extra:
+                block(e, self.f_hint, DIM, min(bottom, y + 3 * lh_h))
+        # the play button
+        bw, bh = int(W * 0.30), int(H * 0.085)
+        by = int(H * 0.84) - bh // 2
+        pygame.draw.rect(self.surface, SELECT, (m, by, bw, bh), border_radius=14)
+        rec = self.movies.get_position(ch.url)
+        label = "Continue" if rec and rec.get("pos", 0) > 15 else "Play"
+        t = self.f_item.render(label, True, SELECT_TEXT)
+        self.surface.blit(t, (m + bw // 2 - t.get_width() // 2,
+                              by + bh // 2 - t.get_height() // 2))
+        self._draw_hint("OK to play  -  Back to the movies")
 
     def _act_channels(self, a):
         if self.current_playlist.is_movies:
@@ -2560,6 +2679,8 @@ class App:
             self._draw_power()
         elif self.screen_state == SCREEN_RESUME:
             self._draw_resume()
+        elif self.screen_state == SCREEN_INFO:
+            self._draw_info()
         elif self.screen_state == SCREEN_SERIES:
             ser = self.current_playlist.series
             self._draw_poster_grid(
@@ -4021,6 +4142,7 @@ class App:
                        getattr(self, "power_index", 0),
                        getattr(self, "resume_index", 0),
                        self.series_index, self.season_index, self.episode_index,
+                       self._info_ver, iptv_posters.version,
                        self.current_series["name"] if self.current_series else "",
                        self.current_playlist.name if self.current_playlist else "",
                        self.show_thumbs, iptv_posters.version,

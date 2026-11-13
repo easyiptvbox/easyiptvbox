@@ -52,6 +52,27 @@ def _update_status():
     return st
 
 
+def _update_check():
+    """Ask GitHub whether a newer version exists, without installing it."""
+    import subprocess
+    git = ["git", "-c", "safe.directory=*", "-C", UPDATE_SRC]
+    try:
+        f = subprocess.run(["sudo", "-n"] + git + ["fetch", "--quiet",
+                            "origin", "main"], capture_output=True,
+                           text=True, timeout=40)
+        if f.returncode != 0:
+            return {"ok": False, "error": "Could not reach GitHub."}
+        r = subprocess.run(git + ["log", "HEAD..origin/main", "--format=%s"],
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode != 0:
+            return {"ok": False, "error": "Could not compare versions."}
+        subj = [x for x in r.stdout.splitlines() if x.strip()]
+        return {"ok": True, "available": bool(subj), "count": len(subj),
+                "changes": subj[:5]}
+    except Exception as e:
+        return {"ok": False, "error": "Update check failed: %s" % e}
+
+
 def _current_theme():
     """The box-wide theme (shared by the web app and the TV)."""
     try:
@@ -615,6 +636,21 @@ class ControlServer:
                     except Exception as e:
                         self._send(500, {"error": str(e)})
                     return
+                if path == "/api/play/info":
+                    import iptv_stream, iptv_movieinfo, urllib.parse as up
+                    qs = up.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                    it = iptv_stream.resolve(qs.get("id", [""])[0], "movie")
+                    if not it:
+                        self._send(404, {"error": "Not found"})
+                        return
+                    from iptv_config import load_config
+                    try:
+                        prov = load_config()._data.get("provider") or {}
+                        self._send(200, iptv_movieinfo.fetch(
+                            it["url"], it["name"], prov))
+                    except Exception as e:
+                        self._send(502, {"error": "Could not load details: %s" % e})
+                    return
                 if path == "/api/play/series":
                     import iptv_stream, urllib.parse as up
                     qs = up.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
@@ -796,6 +832,9 @@ class ControlServer:
                         outer.pending_scan = urls
                         outer.q.put("__scan_web__")
                     self._send(200, {"ok": True, "channels": len(urls)})
+                    return
+                if path == "/api/update/check":
+                    self._send(200, _update_check())
                     return
                 if path == "/api/update/run":
                     import subprocess
@@ -1209,10 +1248,11 @@ def build_config_yaml(data):
             "username": s(prov.get("username", "")),
             "password": s(prov.get("password", "")),
             "only_categories": [s(c) for c in (prov.get("only_categories") or []) if s(c).strip()],
+            "refresh_hours": max(8, _num(prov.get("refresh_hours")
+                                         or epg.get("refresh_hours"), 96)),
         },
         "epg": {
             "sources": [s(u) for u in (epg.get("sources") or []) if s(u).strip()],
-            "refresh_hours": _num(epg.get("refresh_hours"), 12),
         },
         "playlists": [],
         "settings": {
@@ -1725,16 +1765,11 @@ PAGE = r"""<!DOCTYPE html>
       <p style="color:var(--dim);font-size:.85rem;margin:.2rem 0 .6rem">
         The TV guide is automatic: your live channels are matched to a public
         guide and refreshed every 24 hours. You normally don't need to do
-        anything here. You can add extra XMLTV guide URLs below if you want.</p>
+        anything here. You can add extra XMLTV guide URLs below if you want
+        (they are also fetched every 24 hours).</p>
       <label>Extra guide addresses (XMLTV URLs, one per line, optional)</label>
       <textarea id="epgSources" style="height:6rem" spellcheck="false"
                 placeholder="http://example.com/guide.xml"></textarea>
-      <label>Provider lists refresh every (hours)</label>
-      <input type="number" id="epgRefresh" min="1" max="720" value="96">
-      <p style="color:var(--dim);font-size:.8rem;margin:.3rem 0 0">
-        How often the provider lists (channels, movies, series) are refreshed
-        in the background while idle. Searching always uses the saved copy, so
-        it stays instant. (The TV guide always refreshes every 24 hours.)</p>
     </div>
 
     <div class="card">
@@ -1814,7 +1849,9 @@ PAGE = r"""<!DOCTYPE html>
     <div class="card" id="updCard">
       <h2>Software updates</h2>
       <div id="updStatus" class="pnote"></div>
-      <button class="ghost" id="updBtn" style="width:100%;margin-top:.5rem">Update now</button>
+      <button class="ghost" id="updBtn" style="width:100%;margin-top:.5rem">Check for updates</button>
+      <div id="updResult" class="pnote" style="min-height:1.2em;white-space:pre-line"></div>
+      <button class="save" id="updInstall" style="width:100%;margin-top:.3rem;display:none">Install update</button>
       <label style="display:flex;gap:.5rem;align-items:center;margin-top:.7rem;cursor:pointer">
         <input type="checkbox" id="updAuto" style="width:auto;margin:0">
         <span>Check for updates by itself every Monday night</span>
@@ -1924,6 +1961,12 @@ PAGE = r"""<!DOCTYPE html>
         <input type="text" id="provUser" autocomplete="off">
         <label>Password (leave blank if it is already in the URL above)</label>
         <input type="password" id="provPass" autocomplete="off">
+        <label>Provider lists refresh every (hours, at least 8)</label>
+        <input type="number" id="provRefresh" min="8" max="720" value="96">
+        <p style="color:var(--dim);font-size:.8rem;margin:.3rem 0 0">
+          How often the lists of channels, movies and series are downloaded again.
+          It only happens while nothing is playing. Searching always uses the saved
+          copy, so it stays instant.</p>
       </div>
     </div>
 
@@ -2140,7 +2183,7 @@ async function loadForm(){
   $('provUrl').value=prov.url||''; $('provUser').value=prov.username||'';
   $('provPass').value=prov.password||'';
   $('epgSources').value=(epg.sources||[]).join('\n');
-  $('epgRefresh').value=epg.refresh_hours||96;
+  $('provRefresh').value=Math.max(8,prov.refresh_hours||epg.refresh_hours||96);
   $('textSize').value=st.text_size||'large';
   $('themeSel').value=st.theme||'dark';
   document.documentElement.dataset.theme=st.theme||'dark';
@@ -2160,10 +2203,10 @@ function collectForm(){
       url:$('provUrl').value, username:$('provUser').value,
       password:$('provPass').value,
       only_categories:[],
+      refresh_hours:Math.max(8,parseFloat($('provRefresh').value)||96),
     },
     epg:{
       sources:$('epgSources').value.split('\n').map(s=>s.trim()).filter(Boolean),
-      refresh_hours:parseFloat($('epgRefresh').value)||96,
     },
     settings:{
       text_size:$('textSize').value,
@@ -2427,7 +2470,7 @@ $('themeSel').addEventListener('change',()=>{ document.documentElement.dataset.t
 
 // ---- Profiles ----
 let PROFS=[], PROF_PENDING=null;
-const SHARED_IDS=['provEnabled','provUrl','provUser','provPass','epgSources','epgRefresh','audioDelay'];
+const SHARED_IDS=['provEnabled','provUrl','provUser','provPass','epgSources','provRefresh','audioDelay'];
 function profMsg(ok,t){ const m=$('profMsg'); m.textContent=t; m.style.color=ok?'var(--oktx)':'var(--errtx)'; }
 function profAvatar(p,px){
   const d=document.createElement('div');
@@ -2705,9 +2748,37 @@ $('updAuto').onchange=async()=>{
   loadUpdate();
 };
 $('updBtn').onclick=async()=>{
+  const res=$('updResult'), ins=$('updInstall'); ins.style.display='none';
+  res.style.color=''; res.textContent='Checking for updates\u2026';
+  $('updBtn').disabled=true;
+  try{
+    const d=await (await fetch('/api/update/check',{method:'POST'})).json();
+    if(!d.ok){ res.style.color='var(--errtx)'; res.textContent=d.error||'Could not check for updates.'; }
+    else if(!d.available){ res.style.color='var(--oktx)'; res.textContent='No updates available. You are on the latest version.'; }
+    else{
+      res.textContent='Updates available ('+d.count+' change'+(d.count>1?'s':'')+'):\n\u2022 '+d.changes.join('\n\u2022 ')+(d.count>d.changes.length?'\n\u2026':'');
+      ins.style.display='';
+    }
+  }catch(e){ res.style.color='var(--errtx)'; res.textContent='Could not check for updates.'; }
+  $('updBtn').disabled=false;
+};
+$('updInstall').onclick=async()=>{
+  const res=$('updResult'); $('updInstall').style.display='none';
   await fetch('/api/update/run',{method:'POST'});
-  showMsg(true,'Checking for updates\u2026 the player may restart.');
-  setTimeout(loadUpdate,3000);
+  res.style.color=''; res.textContent='Installing the update\u2026 the player may restart.';
+  let n=0;
+  const poll=async()=>{
+    n++; let st=null;
+    try{ st=await (await fetch('/api/update/status')).json(); }catch(e){}
+    if(st&&!st.running&&n>1){
+      const l=st.last||{};
+      res.style.color=l.result==='ok'?'var(--oktx)':'var(--errtx)';
+      res.textContent=l.result==='ok'?'Done: '+(l.message||'updated')+'.':(l.message||'The update failed.');
+      loadUpdate(); return;
+    }
+    if(n<60) setTimeout(poll,3000); else res.textContent='Still installing. Reload this page in a minute.';
+  };
+  setTimeout(poll,4000);
 };
 
 // ---- Remote access ----
@@ -2935,9 +3006,37 @@ async function loadPlay(){
   };
   showCats();
   const mv=$('pmovies'); mv.innerHTML='';
-  if((d.movies||[]).length)
+  const showMovies=()=>{
+    mv.innerHTML='';
     mv.appendChild(posterGrid(d.movies.map(m=>({key:m.id,name:m.name,src:m.poster?pq('/api/poster/'+m.poster+'.jpg'):'',m:m})),
-      it=>playItem('movie',it.m.id,it.m.name,it.m.ext)));
+      it=>showMovie(it.m)));
+  };
+  const showMovie=async m=>{
+    mv.innerHTML='';
+    const b=document.createElement('button'); b.className='ghost'; b.type='button';
+    b.textContent='\u2190 Movies'; b.style.cssText='width:100%;margin-bottom:.5rem'; b.onclick=showMovies; mv.appendChild(b);
+    const box=document.createElement('div'); box.style.cssText='display:flex;gap:1rem;flex-wrap:wrap';
+    const img=document.createElement('div'); img.style.cssText='flex:0 0 140px';
+    if(m.poster){ const i=document.createElement('img'); i.src=pq('/api/poster/'+m.poster+'.jpg'); i.style.cssText='width:140px;border-radius:8px'; img.appendChild(i); }
+    const txt=document.createElement('div'); txt.style.cssText='flex:1;min-width:200px';
+    const h=document.createElement('div'); h.style.cssText='font-weight:700;font-size:1.05rem'; h.textContent=m.name; txt.appendChild(h);
+    const body=document.createElement('div'); body.style.cssText='margin-top:.4rem;white-space:pre-line'; body.textContent='Loading details\u2026'; txt.appendChild(body);
+    const play=document.createElement('button'); play.className='save'; play.type='button'; play.textContent='Play'; play.style.cssText='margin-top:.7rem;width:100%';
+    play.onclick=()=>playItem('movie',m.id,m.name,m.ext); txt.appendChild(play);
+    box.appendChild(img); box.appendChild(txt); mv.appendChild(box);
+    try{
+      const r=await fetch('/api/play/info?id='+encodeURIComponent(m.id)); const x=await r.json();
+      if(!r.ok) throw new Error(x.error||'failed');
+      const meta=[x.year, x.runtime?(Math.floor(x.runtime/60)?Math.floor(x.runtime/60)+'h '+String(x.runtime%60).padStart(2,'0')+'min':x.runtime+' min'):'', x.genre].filter(Boolean).join('  \u00B7  ');
+      let t=meta;
+      if(x.rating) t+=(t?'\n':'')+'Rating '+x.rating+' / 10'+(x.rating_src?' ('+x.rating_src+')':'');
+      t+=(t?'\n\n':'')+(x.plot||'No description available.');
+      if(x.director) t+='\n\nDirector: '+x.director;
+      if(x.cast) t+='\nCast: '+x.cast;
+      body.textContent=t;
+    }catch(e){ body.textContent='No details available.'; }
+  };
+  if((d.movies||[]).length) showMovies();
   else mv.textContent='No movies added under Settings.';
   const se=$('pseries'); se.innerHTML=''; $('peps').innerHTML='';
   if((d.series||[]).length){

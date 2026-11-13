@@ -2,12 +2,23 @@
 
 Changes and fixes per week, latest on top (last 10 weeks).
 
-## Week of 26 October 2026
+## Week of 9 November 2026
 
 **New**
+- **Movie fact sheet** (issue #14): OK on a movie (TV) or a tap on it (Play tab in the web app) first opens a page with the poster, year, length, genre, rating, description, director and cast, with a Play button. The details come from the provider (TMDB data); when the provider has no description, a short summary from Wikipedia is used. Details are remembered, so each movie is looked up only once.
+- **Update check** (issue #15): Settings > Software updates now has "Check for updates". It stays on the same place and says "No updates available. You are on the latest version." or lists what is new with an "Install update" button; after installing it shows the result.
+- **Provider list refresh** (issue #16): the setting moved from the TV guide card to the IPTV provider card, can not be lower than 8 hours any more, and the refresh now waits until nothing is playing on the TV or streamed to a phone. The TV guide itself (and extra guide addresses) always refresh every 24 hours.
 - **Simple mode with movies and series** (issue #9): the simple-mode list can now also hold saved movies and whole seasons of series. They continue where you stopped, with no question and no pause, and only the title is shown for a moment. When a movie or episode ends, the next item in the list starts by itself (after the last one the list starts over). The buttons work as for live channels, and all seasons of a series count as one item: the buttons jump to the next channel / movie / series, and the episodes (and the next season, after the last episode) play one after another by themselves.
 - **Movie folders**: Settings > Movie folders > Browse all movie categories adds a whole provider movie category to Movies as a folder (issue #13). On the TV the folders come first, shown as a collage of their first posters with the number of movies; OK opens the folder and shows all the movies in that category. The first 150 posters of every folder are downloaded in the background (low priority, and from a smaller picture size), the pictures you scroll to are fetched first.
 - **TV guide while paused** (issue #11): on a live channel, OK now pauses and shows the guide for the next hours (the programme on now in green); OK again resumes.
+
+**Fixed**
+- Volume and mute are now remembered when you switch channel or start a movie, until the box restarts. Before, every new stream started at full volume (issue #12).
+- The movie / episode menu (Resume, Audio track, Subtitles, Jump to time, Stop) is now kept on screen reliably: it is re-sent a few times right after OK and refreshed while it is open, and a failed command to the player is retried instead of lost (issue #10).
+
+## Week of 26 October 2026
+
+**New**
 - Newly added movies and series (in the web app, or found by a saved search) now go to the top of their list, and a movie or an episode you start watching moves to the top too (issue #8).
 - **Simple mode** (Settings > Simple mode): for someone who just wants to watch TV. The box boots straight onto a channel you picked (from several categories, in your order) and every remote button except volume and mute switches channel: Left goes to the previous one, all others to the next. Your changes only take effect after you press **Apply**, and turning it on shows a warning with how to switch it off again. It remembers the last channel, skips channels that don't work, and the power button still works.
 - **TCP mode** for remote access (Settings > Remote access): a second way to reach the box from networks that block WireGuard. It uses VLESS + Reality (sing-box) on a TCP port you choose (default 8443), works with the sing-box, Hiddify and v2rayNG apps, only reaches the box, and is off until you turn it on.
@@ -48,8 +59,6 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - README points to the QR code on the TV start page for opening the web app.
 
 **Fixed**
-- Volume and mute are now remembered when you switch channel or start a movie, until the box restarts. Before, every new stream started at full volume (issue #12).
-- The movie / episode menu (Resume, Audio track, Subtitles, Jump to time, Stop) is now kept on screen reliably: it is re-sent a few times right after OK and refreshed while it is open, and a failed command to the player is retried instead of lost (issue #10).
 - Remote setup: a USB remote or air mouse (2.4 GHz dongle) works as a keyboard and needs no learning. The setup wizard only listened for infrared, so it stalled on the second button; it now notices a USB remote, stops, and says it needs no setup. The menu key of such remotes now opens the menu too (issue #1).
 - The stretched-picture fix sometimes did not apply right after a movie started (the player read the video's shape too early and skipped it). It now waits for the shape, checks that the player accepted the settings, and retries.
 - Simple mode (and any settings change): the TV became very slow and the screen seemed to restart when pressing OK. Every save in the web app started another heavy TV-guide matching job, and a dozen of them ran at once. The guide is now rebuilt by one job at a time, and only when the list of live channels actually changed. In simple mode the boot splash is no longer shown again when the list opens.

@@ -71,7 +71,7 @@ GitHub (`main`) **every Monday ~04:00** (`iptv-update.timer`)
 and applies new versions: it fast-forwards `/opt/easyiptvbox`, syncs the app
 (your `config.yaml`, `remotes.json` and cache are never touched), restarts the
 player and rolls back automatically if the player doesn't start.
-Use **Settings > Software updates > Update now** to update immediately, or
+Use **Settings > Software updates > Check for updates** to see whether a new version exists (then **Install update**), or
 `sudo /opt/easyiptvbox/deploy/update.sh`. Logs: `journalctl -u iptv-update`.
 Only the repo owner can push to `main`. See [WHATS_NEW.md](WHATS_NEW.md) for
 the changes per week (also linked from Settings).

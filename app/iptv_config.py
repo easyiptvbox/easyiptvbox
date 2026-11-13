@@ -21,6 +21,9 @@ CACHE_DIR = os.environ.get("IPTV_CACHE", os.path.join(APP_DIR, "cache"))
 TEXT_SIZES = {"small": 0.75, "normal": 1.0, "large": 1.3, "extra_large": 1.6}
 
 
+MIN_REFRESH_HOURS = 8.0
+
+
 class Channel:
     __slots__ = ("name", "url", "logo", "tvg_id", "kind", "gid")
 
@@ -54,10 +57,20 @@ class Config:
         self._data = data or {}
         self.playlists = []
         self.epg_sources = list((self._data.get("epg") or {}).get("sources") or [])
-        self.epg_refresh_hours = float((self._data.get("epg") or {}).get("refresh_hours") or 12)
-        # The "Refresh every (hours)" setting also controls how often the
-        # provider caches (channels / movies / series) are refreshed.
-        self.refresh_hours = self.epg_refresh_hours
+        # Extra XMLTV guide files are fetched once a day; the automatic guide
+        # has its own 24-hour timer.
+        self.epg_refresh_hours = 24.0
+        # How often the provider lists (channels / movies / series) are
+        # renewed: provider.refresh_hours (older configs kept it under epg:),
+        # never less than 8 hours.
+        _p = self._data.get("provider") or {}
+        try:
+            _h = float(_p.get("refresh_hours")
+                       or (self._data.get("epg") or {}).get("refresh_hours")
+                       or 96)
+        except (TypeError, ValueError):
+            _h = 96.0
+        self.refresh_hours = max(MIN_REFRESH_HOURS, _h)
         s = self._data.get("settings") or {}
         self.text_scale = TEXT_SIZES.get(str(s.get("text_size", "large")), 1.3)
         self.theme = "light" if str(s.get("theme", "dark")) == "light" else "dark"

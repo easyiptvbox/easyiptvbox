@@ -58,8 +58,6 @@ epg:
   # Example (uncomment and use if you run the iptv-org epg generator):
   #sources:
   #  - "http://192.168.0.168:3000/guide.xml"
-  # How often to refresh the guide, in hours.
-  refresh_hours: 12
 
 
 # ---------------------------------------------------------------------

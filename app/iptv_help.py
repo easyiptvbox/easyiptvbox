@@ -115,13 +115,16 @@ Without it VLC opens but shows an error. If VLC isn't listed, open the VLC app o
 
 <section id="movies"><h2>Movies</h2>
 <ul>
+ <li>OK on a movie (TV), or a tap on it in the Play tab, opens its <b>fact sheet</b>: poster, year, length, genre, rating,
+  description, director and cast, with a Play button. The details come from the provider (the rating is TMDB's, 0&ndash;10); if the
+  provider has no description, a short summary from Wikipedia is shown. They are remembered after the first time.</li>
  <li>Type part of a title and press Search. All words must match, in any order
   (&ldquo;night summer&rdquo; finds &ldquo;Hot Summer Nights&rdquo;).</li>
  <li><b>Add</b> puts a movie in the Movies category on the TV. It is saved automatically.</li>
  <li><b>Add future results automatically</b> (top of the results) saves the search. When the
   provider lists are renewed, new matches are added to Movies and the saved search is removed.</li>
  <li>Searches use the box's copy of the provider list, renewed every
-  &ldquo;Provider lists refresh every (hours)&rdquo; (see <a href="#epg">TV guide</a>).</li>
+  &ldquo;Provider lists refresh every (hours)&rdquo; (see <a href="#provider">IPTV provider</a>).</li>
  <li><b>Movie folders</b> (Settings &gt; Movie folders): <b>Browse all movie categories</b> opens a page with every movie category
   of your provider. Tap <b>Add</b> to put a whole category in Movies as a <b>folder</b>. On the TV the folders come first
   (with a collage of their first pictures and the number of movies); OK opens a folder and shows all its movies, Back or Left
@@ -146,8 +149,8 @@ pick a series, a season and an episode. &ldquo;Add future results automatically&
 <section id="epg"><h2>TV guide (EPG)</h2>
 <p>The box shows what's on now next to live channels. Guide sources are matched to your
 channels automatically and refreshed every 24 hours.</p>
-<p><b>Provider lists refresh every (hours)</b> controls how often the channel, movie and
-series lists are downloaded again (only while nothing is playing). Saved searches are checked then.</p>
+<p>Extra guide addresses are fetched every 24 hours too. The provider lists have their own setting, see
+<a href="#provider">IPTV provider</a>.</p>
 </section>
 
 <section id="simple"><h2>Simple mode</h2>
@@ -294,6 +297,9 @@ its key stops working at once.</p>
 <section id="provider"><h2>IPTV provider</h2>
 <p>Enter the provider address and login. You can paste the full <code>get.php?username=&hellip;&amp;password=&hellip;</code>
 link instead; then the username and password fields can stay empty. It saves automatically.</p>
+<p><b>Provider lists refresh every (hours)</b> (at least 8, default 96) controls how often the channel, movie and
+series lists are downloaded again. It only happens while nothing is playing (on the TV or streamed to a phone). Saved searches are
+checked then.</p>
 <p class="tip">The provider allows one connection at a time: the TV, the Play tab and downloads share it.</p>
 </section>
 

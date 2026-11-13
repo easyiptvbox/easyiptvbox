@@ -1034,17 +1034,43 @@ class App:
                 self._info_ver += 1
             threading.Thread(target=work, daemon=True).start()
 
+    def _open_series_info(self, idx):
+        """OK on a series: show its fact sheet first (seasons from there)."""
+        se = self.current_playlist.series[idx]
+        sid = str(se["series_id"])
+        from iptv_config import Channel
+        self._info = {"kind": "series", "idx": idx,
+                      "channel": Channel(se["name"], "", se.get("logo", "")),
+                      "data": iptv_movieinfo.cached("series:" + sid)}
+        if se.get("logo"):
+            iptv_posters.request([se["logo"]])
+        self.screen_state = SCREEN_INFO
+        self._last_sig = None
+        if self._info["data"] is None:
+            info = self._info
+            prov = self.cfg._data.get("provider") or {}
+
+            def work():
+                info["data"] = iptv_movieinfo.fetch_series(sid, se["name"], prov)
+                self._info_ver += 1
+            threading.Thread(target=work, daemon=True).start()
+
     def _act_info(self, a):
         info = self._info
+        series = bool(info and info.get("kind") == "series")
+        back = SCREEN_SERIES if series else SCREEN_CHANNELS
         if info is None:
             self.screen_state = SCREEN_CHANNELS
             return
         if a == ir.OK:
-            self._grid_play = None
-            self.play_channel(info["idx"])
+            if series:
+                self.open_series(info["idx"])
+            else:
+                self._grid_play = None
+                self.play_channel(info["idx"])
             self._last_sig = None
         elif a in (ir.BACK, ir.LEFT):
-            self.screen_state = SCREEN_CHANNELS
+            self.screen_state = back
             self._last_sig = None
 
     def _draw_info(self):
@@ -1053,7 +1079,8 @@ class App:
             return
         ch, d = info["channel"], info["data"]
         W, H = self.W, self.H
-        self._draw_header(ch.name)
+        sr = info.get("kind") == "series"
+        self._draw_header((d or {}).get("title") or ch.name if sr else ch.name)
         m = int(W * 0.06)
         top = int(H * 0.19)
         ph = int(H * 0.58)
@@ -1089,7 +1116,8 @@ class App:
             meta = [str(d.get("year") or "")]
             if d.get("runtime"):
                 h_, m_ = divmod(int(d["runtime"]), 60)
-                meta.append("%dh %02dmin" % (h_, m_) if h_ else "%d min" % m_)
+                meta.append(("%dh %02dmin" % (h_, m_) if h_ else "%d min" % m_)
+                            + (" per episode" if sr else ""))
             if d.get("genre"):
                 meta.append(d["genre"])
             meta = [p for p in meta if p]
@@ -1113,19 +1141,22 @@ class App:
             plot_limit = bottom - need - (12 if extra else 0)
             block(d.get("plot") or "No description available.", self.f_small,
                   TEXT if d.get("plot") else DIM, plot_limit)
-            y = max(y, plot_limit) + 12 if extra else y
+            y += 12
             for e in extra:
                 block(e, self.f_hint, DIM, min(bottom, y + 3 * lh_h))
         # the play button
         bw, bh = int(W * 0.30), int(H * 0.085)
         by = int(H * 0.84) - bh // 2
         pygame.draw.rect(self.surface, SELECT, (m, by, bw, bh), border_radius=14)
-        rec = self.movies.get_position(ch.url)
-        label = "Continue" if rec and rec.get("pos", 0) > 15 else "Play"
+        series = info.get("kind") == "series"
+        rec = None if series else self.movies.get_position(ch.url)
+        label = "Seasons" if series else (
+            "Continue" if rec and rec.get("pos", 0) > 15 else "Play")
         t = self.f_item.render(label, True, SELECT_TEXT)
         self.surface.blit(t, (m + bw // 2 - t.get_width() // 2,
                               by + bh // 2 - t.get_height() // 2))
-        self._draw_hint("OK to play  -  Back to the movies")
+        self._draw_hint("OK to open the seasons  -  Back to the series" if series
+                        else "OK to play  -  Back to the movies")
 
     def _act_channels(self, a):
         if self.current_playlist.is_movies:
@@ -1237,7 +1268,7 @@ class App:
         if r is None:
             self.menu_focus = True
         elif r == "ok":
-            self.open_series(self.series_index)
+            self._open_series_info(self.series_index)
         else:
             self.series_index = r
 

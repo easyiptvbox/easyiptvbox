@@ -639,6 +639,21 @@ class ControlServer:
                 if path == "/api/play/info":
                     import iptv_stream, iptv_movieinfo, urllib.parse as up
                     qs = up.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                    sid = qs.get("sid", [""])[0]
+                    if sid:                      # a series fact sheet
+                        ser = next((x for x in iptv_stream.catalog()["series"]
+                                    if x["sid"] == sid), None)
+                        if not ser:
+                            self._send(404, {"error": "Not found"})
+                            return
+                        from iptv_config import load_config
+                        try:
+                            prov = load_config()._data.get("provider") or {}
+                            self._send(200, iptv_movieinfo.fetch_series(
+                                sid, ser["name"], prov))
+                        except Exception as e:
+                            self._send(502, {"error": "Could not load details: %s" % e})
+                        return
                     it = iptv_stream.resolve(qs.get("id", [""])[0], "movie")
                     if not it:
                         self._send(404, {"error": "Not found"})
@@ -3051,6 +3066,18 @@ async function loadEpisodes(sid){
     const r=await fetch('/api/play/series?sid='+encodeURIComponent(sid)); const d=await r.json();
     if(!r.ok){ box.textContent=d.error||'Could not load episodes.'; return; }
     box.innerHTML='';
+    const sheet=document.createElement('div'); sheet.style.cssText='margin:.4rem 0 .8rem;white-space:pre-line';
+    sheet.textContent='Loading details\u2026'; box.appendChild(sheet);
+    fetch('/api/play/info?sid='+encodeURIComponent(sid)).then(r=>r.json().then(x=>({ok:r.ok,x}))).then(({ok,x})=>{
+      if(!ok) throw new Error(x.error||'failed');
+      const meta=[x.year, x.runtime?x.runtime+' min per episode':'', x.genre].filter(Boolean).join('  \u00B7  ');
+      let t=(x.title?'\u2605 '+x.title+'\n':'')+meta;
+      if(x.rating) t+=(meta?'\n':'')+'Rating '+x.rating+' / 10'+(x.rating_src?' ('+x.rating_src+')':'');
+      t+='\n\n'+(x.plot||'No description available.');
+      if(x.director) t+='\n\nDirector: '+x.director;
+      if(x.cast) t+='\nCast: '+x.cast;
+      sheet.textContent=t;
+    }).catch(()=>{ sheet.textContent=''; });
     const all={};
     const groups=(d.seasons||[]).map(s=>({group:s.name,items:s.episodes.map(e=>{all[e.id]=e;return {value:e.id,text:e.title};})}));
     box.appendChild(pSelect('Episode',groups,id=>playItem('episode',id,all[id].title,all[id].ext)));

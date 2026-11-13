@@ -5,6 +5,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 9 November 2026
 
 **New**
+- **Series fact sheet** (follow-up to issue #14): OK on a series (TV), or a tap on it in the Play tab, shows its description, year, genre, rating, creator and cast first; OK on the TV continues to the seasons.
 - **Movie fact sheet** (issue #14): OK on a movie (TV) or a tap on it (Play tab in the web app) first opens a page with the poster, year, length, genre, rating, description, director and cast, with a Play button. The details come from the provider (TMDB data); when the provider has no description, a short summary from Wikipedia is used. Details are remembered, so each movie is looked up only once.
 - **Update check** (issue #15): Settings > Software updates now has "Check for updates". It stays on the same place and says "No updates available. You are on the latest version." or lists what is new with an "Install update" button; after installing it shows the result.
 - **Provider list refresh** (issue #16): the setting moved from the TV guide card to the IPTV provider card, can not be lower than 8 hours any more, and the refresh now waits until nothing is playing on the TV or streamed to a phone. The TV guide itself (and extra guide addresses) always refresh every 24 hours.

@@ -34,10 +34,15 @@ def vod_id(url):
 def clean_title(name):
     """('Movie Name (2023)' -> ('Movie Name', '2023'))"""
     name = re.sub(r"^\s*[A-Z]{2,3}\s*[-|:]\s*", "", str(name or ""))
-    m = re.search(r"\((\d{4})\)\s*$", name)
-    year = m.group(1) if m else ""
-    name = re.sub(r"\s*\(\d{4}\)\s*$", "", name).strip()
-    return name, year
+    year = ""
+    while True:                      # trailing "(2025)", "(US)" ...
+        m = re.search(r"\s*\(([^()]{1,12})\)\s*$", name)
+        if not m:
+            break
+        if re.fullmatch(r"\d{4}", m.group(1)):
+            year = year or m.group(1)
+        name = name[:m.start()]
+    return name.strip(), year
 
 
 def cached(url):
@@ -106,9 +111,10 @@ def _from_provider(prov, url):
     }
 
 
-def _from_wikipedia(title, year):
-    """Short summary of the film's Wikipedia article ('' if none found)."""
-    for q in ("%s %s film" % (title, year) if year else "%s film" % title,
+def _from_wikipedia(title, year, kind="movie"):
+    """Short summary of the film's / series' Wikipedia article ('' if none)."""
+    word = "TV series" if kind == "series" else "film"
+    for q in ("%s %s %s" % (title, year, word) if year else "%s %s" % (title, word),
               title):
         s = _get_json("https://en.wikipedia.org/w/api.php?action=query&list="
                       "search&format=json&srlimit=3&srsearch=" +
@@ -127,34 +133,72 @@ def _from_wikipedia(title, year):
     return ""
 
 
+def _series_from_provider(prov, sid):
+    from iptv_config import _parse_provider, _http_json
+    base, user, pw = _parse_provider(prov or {})
+    if not (sid and base and user and pw):
+        return {}
+    d = _http_json("%s/player_api.php?username=%s&password=%s&action="
+                   "get_series_info&series_id=%s" % (
+                       base, urllib.parse.quote(user), urllib.parse.quote(pw),
+                       urllib.parse.quote(str(sid))), timeout=25, retries=2)
+    info = (d or {}).get("info") or {}
+    year = str(info.get("releaseDate") or info.get("release_date") or "")[:4]
+    return {
+        "plot": str(info.get("plot") or info.get("description") or "").strip(),
+        "cast": str(info.get("cast") or "").strip(),
+        "director": str(info.get("director") or "").strip(),
+        "genre": str(info.get("genre") or "").strip(),
+        "year": year if year.isdigit() else "",
+        "runtime": int(_num(info.get("episode_run_time"))),
+        "rating": round(_num(info.get("rating")), 1),
+        "rating_src": "TMDB" if info.get("tmdb") else "",
+    }
+
+
+def fetch_series(sid, name, prov, force=False):
+    """Fact sheet for a series (same fields as a movie). Cached."""
+    key = "series:%s" % sid
+    if not force:
+        c = cached(key)
+        if c is not None:
+            return c
+    return _build(key, name, force_kind="series",
+                  provider=lambda: _series_from_provider(prov, sid))
+
+
+def _build(key, name, force_kind, provider):
+    title, year = clean_title(name)
+    out = {"title": title or str(name), "year": year, "plot": "", "cast": "",
+           "director": "", "genre": "", "runtime": 0, "rating": 0.0,
+           "rating_src": "", "source": "", "t": time.time()}
+    try:
+        for k, v in provider().items():
+            if v:
+                out[k] = v
+        if out["plot"] or out["cast"]:
+            out["source"] = "provider"
+    except Exception as e:
+        print("info (provider) failed: %s" % e, flush=True)
+    if not out["plot"] and title:
+        try:
+            w = _from_wikipedia(title, out["year"] or year, force_kind)
+            if w:
+                out["plot"] = w
+                out["source"] = (out["source"] + " + " if out["source"]
+                                 else "") + "Wikipedia"
+        except Exception as e:
+            print("info (wikipedia) failed: %s" % e, flush=True)
+    with _lock:
+        _save(key, out)
+    return out
+
+
 def fetch(url, name, prov, force=False):
     """The fact sheet for a movie ({} fields may be empty). Cached."""
     if not force:
         c = cached(url)
         if c is not None:
             return c
-    title, year = clean_title(name)
-    out = {"title": title or str(name), "year": year, "plot": "", "cast": "",
-           "director": "", "genre": "", "runtime": 0, "rating": 0.0,
-           "rating_src": "", "source": "", "t": time.time()}
-    try:
-        p = _from_provider(prov, url)
-        for k, v in p.items():
-            if v:
-                out[k] = v
-        if out["plot"] or out["cast"]:
-            out["source"] = "provider"
-    except Exception as e:
-        print("movie info (provider) failed: %s" % e, flush=True)
-    if not out["plot"] and title:
-        try:
-            w = _from_wikipedia(title, out["year"] or year)
-            if w:
-                out["plot"] = w
-                out["source"] = (out["source"] + " + " if out["source"]
-                                 else "") + "Wikipedia"
-        except Exception as e:
-            print("movie info (wikipedia) failed: %s" % e, flush=True)
-    with _lock:
-        _save(url, out)
-    return out
+    return _build(url, name, force_kind="movie",
+                  provider=lambda: _from_provider(prov, url))

@@ -221,10 +221,12 @@ the provider login in the Default profile is shared by all profiles.</p>
 </section>
 
 <section id="appearance"><h2>Appearance</h2>
-<p><b>Theme</b>: Dark, Light or Fireplace (warm colours, a faint flickering glow at the bottom of the TV menus). It applies to both the web app and the TV, and is saved with
+<p><b>Theme</b>: Dark, Light, Fireplace (warm colours, a faint flickering glow at the bottom of the TV menus) or, from 1 December to 6 January,
+Christmas (green and red, faint snow on the TV menus). Christmas is selected automatically on 1 December; if you choose another theme it stays
+that way until the next 1 December, and after 6 January it goes back to your earlier theme. It applies to both the web app and the TV, and is saved with
 the other settings (changes are saved automatically).</p>
 <p><b>Screensaver</b>: off by default. After the chosen time without a button press on a TV menu, the TV shows a calm fireplace
-(Fireplace theme) or a dark screen with a moving clock (other themes). It never starts while something is playing and any button ends it.
+(Fireplace theme), a lit Christmas tree with falling snow (Christmas theme) or a dark screen with a moving clock (other themes). It never starts while something is playing and any button ends it.
 It is a setting of the whole box.</p>
 <p><b>Text size on the TV</b>: Small, Normal, Large or Extra large. Text that is still too
 long is shrunk to fit, and shortened with &ldquo;&hellip;&rdquo; as a last resort.</p>

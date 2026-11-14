@@ -75,6 +75,10 @@ class Config:
         self.text_scale = TEXT_SIZES.get(str(s.get("text_size", "large")), 1.3)
         _t = str(s.get("theme", "dark"))
         self.theme = _t if _t in ("light", "fireplace") else "dark"
+        if _t == "christmas":
+            import iptv_season
+            if iptv_season.christmas_available():
+                self.theme = "christmas"
         # Screensaver after this many minutes without a button on a menu
         # (0 = off). Its look follows the theme.
         try:

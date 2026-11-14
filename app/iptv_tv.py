@@ -105,6 +105,11 @@ THEMES = {
                       DIM=(160, 140, 120), ACCENT=(240, 170, 60),
                       MENU_BG=(28, 19, 15), TILE_BG=(14, 9, 7),
                       POPUP_BG=(40, 27, 21, 250)),
+    "christmas": dict(BG=(13, 27, 20), PANEL=(26, 52, 38), SELECT=(184, 32, 47),
+                      SELECT_TEXT=(255, 255, 255), TEXT=(242, 240, 230),
+                      DIM=(148, 168, 154), ACCENT=(232, 194, 90),
+                      MENU_BG=(15, 32, 23), TILE_BG=(8, 18, 13),
+                      POPUP_BG=(20, 40, 31, 250)),
     "light": dict(BG=(243, 245, 249), PANEL=(224, 229, 238), SELECT=(0, 105, 180),
                   SELECT_TEXT=(255, 255, 255), TEXT=(28, 34, 48),
                   DIM=(95, 104, 120), ACCENT=(30, 140, 75),
@@ -2711,9 +2716,13 @@ class App:
             return
         self.surface.fill(BG)
         self._ox = 0
-        if (self.cfg.theme == "fireplace" and not self.cfg.simple_mode
+        if (self.cfg.theme in ("fireplace", "christmas")
+                and not self.cfg.simple_mode
                 and self.screen_state in SAVER_STATES):
-            self._draw_glow()
+            if self.cfg.theme == "fireplace":
+                self._draw_glow()
+            else:
+                self._draw_snow(time.time(), 34, 0.55)
         if self.cfg.simple_mode and self.screen_state in SIMPLE_FALLBACK:
             self._draw_simple_msg("Starting...")      # never show the menus
             self._draw_message()
@@ -3199,7 +3208,37 @@ class App:
             return int(t * self.SAVER_FPS) + 1
         if self.cfg.theme == "fireplace":
             return int(self._flicker(t) * 14) + 1
+        if self.cfg.theme == "christmas":
+            return int(t * 6) + 1             # faint snow on the menus
         return 0
+
+    def _season_tick(self):
+        """Seasonal themes (Christmas from 1 December): checked at start and
+        then every ten minutes, in the background."""
+        now = time.time()
+        if now - getattr(self, "_season_t", 0) < 600:
+            return
+        self._season_t = now
+
+        def work():
+            try:
+                import iptv_season
+                if iptv_season.check():
+                    self._season_changed = True
+            except Exception as e:
+                print("season check failed: %s" % e, flush=True)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _season_apply(self):
+        """A seasonal check changed a theme: show it at once."""
+        try:
+            self.cfg.theme = load_config().theme
+        except Exception:
+            return
+        set_theme(self.cfg.theme)
+        self._saver = False
+        self._qr_cache = None
+        self._last_sig = None
 
     def _saver_tick(self):
         now = time.time()
@@ -3286,10 +3325,81 @@ class App:
             s.set_at((int(sx), int(sy)), (c, int(c * 0.55), int(c * 0.15)))
         return s
 
+    def _draw_snow(self, t, n, bright):
+        """Slowly falling snowflakes (deterministic from the time, so there is
+        nothing to keep track of). `bright` is 0..1."""
+        W, H = self.W, self.H
+        for k in range(n):
+            depth = 0.35 + 0.65 * ((k * 53) % 17) / 16.0      # near = big, fast
+            speed = 0.020 + 0.050 * depth
+            y = (t * speed + ((k * 7919) % 1013) / 1013.0) % 1.0 * (H + 20) - 10
+            x = (((k * 104729) % 997) / 997.0 * W
+                 + math.sin(t * (0.4 + 0.3 * depth) + k) * W * 0.012)
+            r = 1 + int(2.2 * depth)
+            c = int(255 * bright * (0.45 + 0.55 * depth))
+            pygame.draw.circle(self.surface, (c, c, min(255, c + 8)),
+                               (int(x), int(y)), r)
+
+    def _draw_tree(self, t):
+        """A Christmas tree with twinkling lights, centred low on the screen."""
+        W, H = self.W, self.H
+        cx = W // 2
+        base = int(H * 0.86)
+        th = int(H * 0.58)                      # tree height
+        tw = int(th * 0.62)
+        pygame.draw.rect(self.surface, (70, 42, 22),
+                         (cx - int(tw * 0.05), base - int(th * 0.05),
+                          int(tw * 0.10), int(th * 0.07)))
+        tiers = 4
+        top = base - th
+        lights = []
+        for i in range(tiers):
+            y0 = top + int(th * (0.08 + i * 0.215))
+            y1 = top + int(th * (0.33 + i * 0.215))
+            half = int(tw * (0.20 + i * 0.27) / 2) + 6
+            green = (18 + i * 5, 74 + i * 7, 40 + i * 3)
+            pygame.draw.polygon(self.surface, green,
+                                [(cx, y0), (cx - half, y1), (cx + half, y1)])
+            for j in range(5 + i * 2):          # lights along the tier edge
+                f = (j + 0.5) / (5 + i * 2)
+                lx = cx - half + 2 * half * f
+                ly = y1 - int((y1 - y0) * 0.12) - int(
+                    (1 - abs(2 * f - 1)) * (y1 - y0) * 0.30)
+                lights.append((int(lx), int(ly), i * 7 + j))
+        palette = ((235, 60, 60), (250, 205, 80), (90, 170, 255), (255, 255, 255))
+        for lx, ly, idx in lights:
+            on = 0.5 + 0.5 * math.sin(t * (1.3 + 0.17 * (idx % 5)) + idx * 1.9)
+            c = palette[idx % 4]
+            col = tuple(int(30 + (v - 30) * (0.25 + 0.75 * on)) for v in c)
+            pygame.draw.circle(self.surface, col, (lx, ly), max(3, H // 150))
+            if on > 0.7:                        # a soft halo when lit
+                halo = tuple(v // 4 for v in c)
+                pygame.draw.circle(self.surface, halo, (lx, ly), max(6, H // 75), 2)
+        # the star
+        sy = top + int(th * 0.01)
+        sr = max(10, H // 45)
+        pulse = 0.8 + 0.2 * math.sin(t * 2.0)
+        pts = []
+        for k in range(10):
+            ang = -math.pi / 2 + k * math.pi / 5
+            rr = sr * (1.0 if k % 2 == 0 else 0.45)
+            pts.append((cx + rr * math.cos(ang), sy + rr * math.sin(ang)))
+        pygame.draw.polygon(self.surface, (int(255 * pulse), int(215 * pulse), 90), pts)
+
     def _draw_saver(self):
         t = time.time()
         W, H = self.W, self.H
-        if self.cfg.theme == "fireplace":
+        if self.cfg.theme == "christmas":
+            self.surface.fill((8, 16, 22))
+            # snow on the ground
+            pygame.draw.rect(self.surface, (200, 210, 222),
+                             (0, int(H * 0.92), W, H - int(H * 0.92)))
+            pygame.draw.ellipse(self.surface, (214, 223, 234),
+                                (-W // 8, int(H * 0.90), W + W // 4, int(H * 0.10)))
+            self._draw_tree(t)
+            self._draw_snow(t, 110, 0.8)
+            col = (120, 150, 130)
+        elif self.cfg.theme == "fireplace":
             lw, lh = max(240, W // 4), max(135, H // 4)
             small = self._fire_layer(lw, lh, t)
             # shrink then enlarge: softens the edges into a glowing flame
@@ -3302,8 +3412,13 @@ class App:
         # the clock moves a little every minute (no burn-in)
         m = int(t // 60)
         txt = self.f_title.render(time.strftime("%H:%M"), True, col)
-        x = int(W * (0.06 + 0.70 * ((m * 37) % 100) / 100.0))
+        fr = ((m * 37) % 100) / 100.0
+        if self.cfg.theme == "christmas":       # keep clear of the tree
+            x = int(W * ((0.05 + 0.14 * fr) if m % 2 == 0 else (0.72 + 0.14 * fr)))
+        else:
+            x = int(W * (0.06 + 0.70 * fr))
         y = int(H * (0.06 + 0.36 * ((m * 61) % 100) / 100.0))
+        x = min(x, W - txt.get_width() - int(W * 0.03))
         self.surface.blit(txt, (x, y))
 
     def _draw_clock(self):
@@ -4162,6 +4277,10 @@ class App:
 
             self.player.osd_tick()            # keep menus / banners drawn
             self._saver_tick()
+            self._season_tick()
+            if getattr(self, "_season_changed", False):
+                self._season_changed = False
+                self._season_apply()
             if self.cfg.simple_mode:
                 self._simple_tick()
             if iptv_profiles.ACTIVE != self._loaded_profile and \

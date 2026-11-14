@@ -80,6 +80,9 @@ def _current_theme():
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             st = (yaml.safe_load(f) or {}).get("settings") or {}
         t = str(st.get("theme", "dark"))
+        if t == "christmas":
+            import iptv_season
+            return t if iptv_season.christmas_available() else "dark"
         return t if t in ("light", "fireplace") else "dark"
     except Exception:
         return "dark"
@@ -751,7 +754,10 @@ class ControlServer:
                         self._send(500, {"error": str(e)})
                 elif path == "/api/config-data":
                     try:
-                        self._send(200, iptv_profiles.read_config_data())
+                        import iptv_season
+                        d = dict(iptv_profiles.read_config_data())
+                        d["christmas_available"] = iptv_season.christmas_available()
+                        self._send(200, d)
                     except Exception as e:
                         self._send(500, {"error": str(e)})
                 elif path == "/api/provider/search":
@@ -1304,7 +1310,7 @@ def build_config_yaml(data):
         "playlists": [],
         "settings": {
             "text_size": s(settings.get("text_size", "large")) or "large",
-            "theme": s(settings.get("theme", "dark")) if s(settings.get("theme", "dark")) in ("light", "fireplace") else "dark",
+            "theme": _clean_theme(s(settings.get("theme", "dark"))),
             "screensaver_minutes": max(0, min(240, int(_num(settings.get("screensaver_minutes", 0), 0)))),
             "audio_delay_ms": _num(settings.get("audio_delay_ms", 0), 0),
         },
@@ -1382,6 +1388,13 @@ def build_config_yaml(data):
     body = yaml.safe_dump(doc, sort_keys=False, allow_unicode=True,
                           default_flow_style=False)
     return header + body
+
+
+def _clean_theme(t):
+    if t == "christmas":
+        import iptv_season
+        return t if iptv_season.christmas_available() else "dark"
+    return t if t in ("light", "fireplace") else "dark"
 
 
 def _clean_simple_mode(sm):
@@ -1503,6 +1516,11 @@ PAGE = r"""<!DOCTYPE html>
           --field:#120c09; --tilebg:#0e0907; --btn2:#4a3326; --code:#ffd9a0;
           --errbg:#4a1a10; --errtx:#f0a090; --okbg:#3a2a10; --oktx:#f2c36b; --okbg2:#4a3818; }
   :root[data-theme="fireplace"] body { background:linear-gradient(0deg,#2d1608 0%,#16100d 28%) fixed; }
+  :root[data-theme="christmas"] { --bg:#0f1c15; --panel:#1b3226; --accent:#b8202f; --accent2:#e8c25a;
+          --text:#f2f0e6; --dim:#94a89a; --line:#2c4a3a; --panel2:#14261c;
+          --field:#0b140f; --tilebg:#0a120d; --btn2:#2f4d3c; --code:#ffe9a8;
+          --errbg:#4a1a1a; --errtx:#f4a0a0; --okbg:#1c3d28; --oktx:#a8e6b8; --okbg2:#2a5238; }
+  :root[data-theme="christmas"] body { background:linear-gradient(180deg,#0f1c15 0%,#0f1c15 70%,#16301f 100%) fixed; }
   :root[data-theme="light"] .tab.active { color:#fff; }
   :root[data-theme="light"] .pimg .ptxt { text-shadow:0 1px 2px #0008; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -1833,6 +1851,7 @@ PAGE = r"""<!DOCTYPE html>
         <option value="dark">Dark</option>
         <option value="light">Light</option>
         <option value="fireplace">Fireplace</option>
+        <option value="christmas" id="themeXmas" style="display:none">Christmas</option>
       </select>
       <label>Screensaver on the TV (after no button is pressed on a menu)</label>
       <select id="saverMin">
@@ -2251,9 +2270,11 @@ async function loadForm(){
   $('epgSources').value=(epg.sources||[]).join('\n');
   $('provRefresh').value=Math.max(8,prov.refresh_hours||epg.refresh_hours||96);
   $('textSize').value=st.text_size||'large';
-  $('themeSel').value=st.theme||'dark';
+  { const xo=$('themeXmas'); const av=!!d.christmas_available;
+    xo.style.display=av?'':'none'; xo.disabled=!av; xo.hidden=!av;
+    $('themeSel').value=(st.theme==='christmas'&&!av)?'dark':(st.theme||'dark'); }
   $('saverMin').value=String(st.screensaver_minutes||0);
-  document.documentElement.dataset.theme=st.theme||'dark';
+  document.documentElement.dataset.theme=$('themeSel').value;
   $('audioDelay').value=(st.audio_delay_ms!==undefined&&st.audio_delay_ms!==null)?st.audio_delay_ms:0;
   PL=JSON.parse(JSON.stringify(d.playlists||[]));
   PL.forEach(p=>{p.channels=p.channels||[];});
@@ -3345,7 +3366,7 @@ $('wifiRetestBtn').onclick=async()=>{
 loadWifi();
 if(PROF.id!=='default'){      // restored profile of this browser session
   loadProfiles();
-  fetch('/api/config-data').then(r=>r.ok?r.json():null).then(d=>{ if(d) document.documentElement.dataset.theme=(d.settings||{}).theme||'dark'; }).catch(()=>{});
+  fetch('/api/config-data').then(r=>r.ok?r.json():null).then(d=>{ if(d){ let th=(d.settings||{}).theme||'dark'; if(th==='christmas'&&!d.christmas_available) th='dark'; document.documentElement.dataset.theme=th; } }).catch(()=>{});
 }
 
 </script>

@@ -105,6 +105,7 @@ def _from_provider(prov, url):
         "genre": str(info.get("genre") or "").strip(),
         "year": year if year.isdigit() else "",
         "runtime": runtime,
+        "duration": int(_num(info.get("duration_secs"))),
         "rating": round(_num(info.get("rating")), 1),
         "rating_src": "TMDB" if info.get("tmdb_id") else "",
         "cover": str(info.get("cover_big") or info.get("movie_image") or ""),

@@ -5,6 +5,7 @@ Stored as JSON in the cache directory so it survives restarts/reboots.
 import os
 import json
 import threading
+import time
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.environ.get("IPTV_CACHE", os.path.join(APP_DIR, "cache"))
@@ -40,14 +41,44 @@ class MovieState:
     """Resume positions keyed by movie URL, plus global language prefs."""
 
     def __init__(self):
+        self._path = None
+        self._mt = 0
+        self._sync_t = 0.0
+        self._sync(force=True)
+
+    def _sync(self, force=False):
+        """(Re)load the saved state when the file changed: the web app and
+        VLC downloads save positions too, and the TV must see them."""
+        now = time.time()
+        if not force and now - self._sync_t < 1.0:
+            return
+        self._sync_t = now
+        p = _state_path()
+        try:
+            mt = os.path.getmtime(p)
+        except OSError:
+            mt = 0
+        if p == self._path and mt == self._mt:
+            return
         with _lock:
             self._data = _load()
+        self._path, self._mt = p, mt
+        self.__dict__.pop("_wset", None)
         self._data.setdefault("positions", {})   # url -> {pos, duration}
         self._data.setdefault("watched", [])     # urls watched > 75%
         self._data.setdefault("prefs", {})        # {audio_lang, sub_lang, subs_on}
 
+    def _persist(self):
+        with _lock:
+            _save(self._data)
+        try:
+            self._mt = os.path.getmtime(_state_path())
+        except OSError:
+            pass
+
     # -- resume positions ------------------------------------------------
     def get_position(self, url):
+        self._sync()
         rec = self._data["positions"].get(url)
         if not rec:
             return None
@@ -56,6 +87,7 @@ class MovieState:
     WATCHED_RATIO = 0.75
 
     def is_watched(self, url):
+        self._sync()
         return url in self._watched_set()
 
     def _watched_set(self):
@@ -65,13 +97,14 @@ class MovieState:
         return w
 
     def mark_watched(self, url):
+        self._sync(force=True)
         if url and url not in self._watched_set():
             self._watched_set().add(url)
             self._data["watched"] = sorted(self._watched_set())
-            with _lock:
-                _save(self._data)
+            self._persist()
 
     def save_position(self, url, pos, duration=0):
+        self._sync(force=True)
         if duration and pos and pos >= duration * self.WATCHED_RATIO:
             self.mark_watched(url)
         # If we're within the last 90s (or before 15s), treat as "finished"
@@ -81,13 +114,12 @@ class MovieState:
         elif pos is not None and pos > 15:
             self._data["positions"][url] = {
                 "pos": float(pos), "duration": float(duration or 0)}
-        with _lock:
-            _save(self._data)
+        self._persist()
 
     def clear_position(self, url):
+        self._sync(force=True)
         self._data["positions"].pop(url, None)
-        with _lock:
-            _save(self._data)
+        self._persist()
 
     # -- language preferences -------------------------------------------
     @property
@@ -133,22 +165,22 @@ class MovieState:
         """A chosen audio language moves to the top of the history (max 8)."""
         if not lang:
             return
+        self._sync(force=True)
         p = self._data["prefs"]
         lst = [l for l in self.audio_langs if l != lang]
         p["audio_langs"] = ([lang] + lst)[:8]
         p["audio_lang"] = lang
-        with _lock:
-            _save(self._data)
+        self._persist()
 
     def set_sub_pref(self, lang, on):
         """A chosen subtitle language moves to the top of the history (max 8
         kept). Choosing Off (on=False) changes nothing that is saved."""
         if not (on and lang):
             return
+        self._sync(force=True)
         p = self._data["prefs"]
         lst = [l for l in self.sub_langs if l != lang]
         p["sub_langs"] = ([lang] + lst)[:8]
         p["sub_lang"] = lang
         p["subs_on"] = True
-        with _lock:
-            _save(self._data)
+        self._persist()

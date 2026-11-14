@@ -636,6 +636,20 @@ class ControlServer:
                     except Exception as e:
                         self._send(500, {"error": str(e)})
                     return
+                if path == "/api/play/position":
+                    import iptv_stream, iptv_movies, urllib.parse as up
+                    qs = up.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                    it = iptv_stream.resolve(qs.get("id", [""])[0],
+                                             qs.get("kind", [None])[0])
+                    if not it or it["kind"] == "live":
+                        self._send(404, {"error": "Not found"})
+                        return
+                    ms = iptv_movies.MovieState()
+                    rec = ms.get_position(it["url"]) or {}
+                    self._send(200, {"pos": int(rec.get("pos", 0)),
+                                     "duration": int(rec.get("duration", 0)),
+                                     "watched": ms.is_watched(it["url"])})
+                    return
                 if path == "/api/play/info":
                     import iptv_stream, iptv_movieinfo, urllib.parse as up
                     qs = up.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
@@ -811,6 +825,23 @@ class ControlServer:
                          "systemctl disable --now iptv-update.timer")],
                         capture_output=True, timeout=20)
                     self._send(200, {"ok": True, "auto": on})
+                    return
+                if path == "/api/play/position":
+                    import iptv_stream, iptv_movies
+                    try:
+                        d = json.loads(raw or b"{}")
+                        pos = float(d.get("pos") or 0)
+                        dur = float(d.get("duration") or 0)
+                    except Exception:
+                        self._send(400, {"error": "bad request"})
+                        return
+                    it = iptv_stream.resolve(str(d.get("id", "")),
+                                             str(d.get("kind") or "") or None)
+                    if not it or it["kind"] == "live" or not (0 < pos < 1e6):
+                        self._send(404, {"error": "Not found"})
+                        return
+                    iptv_movies.MovieState().save_position(it["url"], pos, dur)
+                    self._send(200, {"ok": True})
                     return
                 if path == "/api/play/tv":
                     import iptv_stream
@@ -1624,6 +1655,7 @@ PAGE = r"""<!DOCTYPE html>
       <video id="pv" controls playsinline preload="metadata"
              style="width:100%;max-height:60vh;background:#000;border-radius:10px"></video>
       <div id="pst" class="pnote"></div>
+      <a class="pbtn alt" id="pstart" href="#" style="display:none">Start from the beginning</a>
       <a class="pbtn" id="ptv" href="#" style="background:var(--accent);color:#fff">Play on TV</a>
       <a class="pbtn" id="pvlc" href="#">Open in VLC</a>
       <a class="pbtn alt" id="pdl" href="#" download>Download to this device</a>
@@ -2924,8 +2956,21 @@ $('raTest').onclick=async()=>{
 
 // ---- Play tab ----
 let PSELS=[];
+let LASTSAVE=0;
+function fmtT(s){ s=Math.floor(s); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60;
+  return (h?h+':'+String(m).padStart(2,'0'):m)+':'+String(x).padStart(2,'0'); }
+function savePos(force){
+  // remember where the movie / episode is, so the TV (or the next time) can continue
+  const v=$('pv'); if(!v||!PCUR||PCUR.kind==='live'||!v.getAttribute('src')) return;
+  const t=v.currentTime, d=v.duration;
+  if(!(t>0)||!isFinite(d)||!(d>0)) return;
+  const now=Date.now(); if(!force&&now-LASTSAVE<15000) return; LASTSAVE=now;
+  fetch('/api/play/position',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({id:PCUR.id,kind:PCUR.kind,pos:t,duration:d}),keepalive:true}).catch(()=>{});
+}
 function stopPlayer(){
   const v=$('pv'); if(!v) return;
+  try{ savePos(true); }catch(e){}
   try{ v.pause(); v.removeAttribute('src'); v.load(); }catch(e){}
 }
 function pSelect(label,options,onpick){
@@ -3037,7 +3082,15 @@ async function loadPlay(){
     const h=document.createElement('div'); h.style.cssText='font-weight:700;font-size:1.05rem'; h.textContent=m.name; txt.appendChild(h);
     const body=document.createElement('div'); body.style.cssText='margin-top:.4rem;white-space:pre-line'; body.textContent='Loading details\u2026'; txt.appendChild(body);
     const play=document.createElement('button'); play.className='save'; play.type='button'; play.textContent='Play'; play.style.cssText='margin-top:.7rem;width:100%';
-    play.onclick=()=>playItem('movie',m.id,m.name,m.ext); txt.appendChild(play);
+    play.onclick=()=>playItem('movie',m.id,m.name,m.ext,0); txt.appendChild(play);
+    fetch('/api/play/position?kind=movie&id='+encodeURIComponent(m.id)).then(r=>r.ok?r.json():null).then(j=>{
+      if(!j||!(j.pos>15)) return;
+      play.textContent='Continue from '+fmtT(j.pos);
+      play.onclick=()=>playItem('movie',m.id,m.name,m.ext,j.pos);
+      const st=document.createElement('button'); st.className='ghost'; st.type='button'; st.textContent='Play from the start';
+      st.style.cssText='margin-top:.4rem;width:100%'; st.onclick=()=>playItem('movie',m.id,m.name,m.ext,0);
+      play.insertAdjacentElement('afterend',st);
+    }).catch(()=>{});
     box.appendChild(img); box.appendChild(txt); mv.appendChild(box);
     try{
       const r=await fetch('/api/play/info?id='+encodeURIComponent(m.id)); const x=await r.json();
@@ -3084,14 +3137,23 @@ async function loadEpisodes(sid){
   }catch(e){ box.textContent='Could not load episodes.'; }
 }
 let PCUR=null;
-function playItem(kind,id,name,ext){
+async function playItem(kind,id,name,ext,startAt){
   openPlayCard(kind);
   stopPlayer();
   const v=$('pv'), st=$('pst');
   const src=location.origin+'/stream/'+kind+'/'+id+'.'+(ext||'ts');
   $('pcard').style.display=''; $('ptitle').textContent=name;
+  $('pstart').style.display='none';
+  // where did this movie / episode stop last time (on the TV, here or in VLC)?
+  let from=0, resumed=false;
+  if(kind!=='live'){
+    if(startAt===undefined){
+      try{ const r=await fetch('/api/play/position?kind='+kind+'&id='+encodeURIComponent(id));
+        if(r.ok){ const j=await r.json(); if(j.pos>15) { from=j.pos; resumed=true; } } }catch(e){}
+    }else from=startAt;
+  }
   const tq='';
-  const vsrc=src+(tq?'?'+tq:'');
+  const vsrc=src+(kind!=='live'?'?vlc=1&p='+encodeURIComponent(PROF.id):'');
   const ios=/iPhone|iPad|iPod/.test(navigator.userAgent) ||
             (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
   if(ios){
@@ -3101,10 +3163,11 @@ function playItem(kind,id,name,ext){
   }else{
     // desktop VLC doesn't: hand over a small playlist file instead
     $('pvlc').href='data:audio/x-mpegurl;charset=utf-8,'+
-      encodeURIComponent('#EXTM3U\n#EXTINF:-1,'+name+'\n'+vsrc+'\n');
+      encodeURIComponent('#EXTM3U\n#EXTINF:-1,'+name+'\n'+(from>15?'#EXTVLCOPT:start-time='+Math.floor(from)+'\n':'')+vsrc+'\n');
     $('pvlc').setAttribute('download',(name||'stream').replace(/[^A-Za-z0-9 _.-]+/g,'_').trim()+'.m3u');
   }
   PCUR={kind:kind,id:id,sid:CURSID};
+  LASTSAVE=Date.now();
   const isLive=(kind==='live');
   $('pdl').style.display=isLive?'none':''; $('pdlnote').style.display=isLive?'none':'';
   $('pdl').href=src+'?dl=1'+(tq?'&'+tq:'');
@@ -3119,6 +3182,14 @@ function playItem(kind,id,name,ext){
     }
   }else if(['mp4','m4v','mov'].includes((ext||'').toLowerCase())){
     v.src=src; st.textContent='';
+    if(from>15){
+      v.addEventListener('loadedmetadata',()=>{ try{ v.currentTime=from; }catch(e){} },{once:true});
+      if(resumed){
+        st.textContent='Continuing from '+fmtT(from)+'. Press play.';
+        const b=$('pstart'); b.style.display='';
+        b.onclick=e=>{ e.preventDefault(); playItem(kind,id,name,ext,0); };
+      }
+    }
   }else{
     v.style.display='none';
     st.textContent='This format plays in VLC only (or download it).';
@@ -3141,6 +3212,10 @@ $('ptv').onclick=async(e)=>{
   v.addEventListener('waiting',()=>st.textContent='Loading\u2026');
   v.addEventListener('error',()=>{ if(v.getAttribute('src')) st.textContent='Could not play here \u2013 try "Open in VLC".'; });
   $('pvlc').addEventListener('click',stopPlayer);
+  v.addEventListener('timeupdate',()=>savePos(false));
+  v.addEventListener('pause',()=>savePos(true));
+  v.addEventListener('ended',()=>savePos(true));
+  window.addEventListener('pagehide',()=>savePos(true));
   $('pdl').addEventListener('click',()=>{ stopPlayer(); st.textContent='Download started - see the download icon.'; });
 })();
 

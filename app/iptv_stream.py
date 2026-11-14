@@ -181,6 +181,7 @@ def series_episodes(sid):
         eps = []
         for e in season.get("episodes", []):
             it = _item("episode", e["title"], e["url"])
+            it["dur"] = int(e.get("duration") or 0)
             _extra[it["id"]] = it
             eps.append({"id": it["id"], "title": it["name"], "ext": it["ext"]})
         out.append({"name": season.get("name", ""), "episodes": eps})
@@ -215,6 +216,7 @@ def resolve(item_id, kind=None):
                 for e in season.get("episodes", []):
                     if movie_id(e["url"]) == item_id:
                         it = _item("episode", e["title"], e["url"])
+                        it["dur"] = int(e.get("duration") or 0)
                         _extra[item_id] = it
                         break
     if it and kind and it["kind"] != kind:
@@ -409,6 +411,48 @@ def _disposition(fname):
         ascii_name.replace('"', ""), urllib.parse.quote(fname))
 
 
+def _duration(movie):
+    """Length in seconds of a movie / episode (0 when unknown)."""
+    d = int(movie.get("dur") or 0)
+    if d:
+        return d
+    try:
+        import iptv_movieinfo
+        c = iptv_movieinfo.cached(movie["url"])
+        if c:
+            return int(c.get("duration") or 0) or int(c.get("runtime") or 0) * 60
+    except Exception:
+        pass
+    return 0
+
+
+def _vlc_save(movie, pid, start, pos, size):
+    """VLC / other players do not report where they are: estimate it from how
+    far into the file they have read, and remember it as the resume point."""
+    if size <= 0 or start >= 0.9 * size or pos - start < 512 * 1024:
+        return                       # a probe of the file end, or too little
+    import iptv_profiles
+    import iptv_movies
+    prev = getattr(iptv_profiles._local, "pid", None)
+    try:
+        iptv_profiles.set_request(pid if iptv_profiles.exists(pid)
+                                  else iptv_profiles.DEFAULT)
+        ms = iptv_movies.MovieState()
+        dur = _duration(movie)
+        if not dur:
+            rec = ms.get_position(movie["url"])
+            dur = int(rec.get("duration", 0)) if rec else 0
+        if not dur:
+            return
+        sec = pos / float(size) * dur
+        if sec > 15:
+            ms.save_position(movie["url"], sec, dur)
+    except Exception as e:
+        log("  could not save position: %r" % (e,))
+    finally:
+        iptv_profiles.set_request(prev)
+
+
 def serve(handler, movie, head_only=False, download=False):
     """Answer an HTTP GET/HEAD for `movie` on BaseHTTPRequestHandler
     `handler`, with Range support and the cached prefix."""
@@ -419,6 +463,20 @@ def serve(handler, movie, head_only=False, download=False):
     size = info["size"] if info else 0
     have = info["have"] if info else 0
     rng = _parse_range(handler.headers.get("Range"), size)
+    vlc_pid, vs = None, {"t": time.time(), "start": 0, "pos": 0}
+    if not download and not head_only and movie["kind"] != "live":
+        import urllib.parse as _up
+        _q = _up.parse_qs(handler.path.partition("?")[2])
+        if _q.get("vlc"):
+            vlc_pid = (_q.get("p") or [""])[0] or "default"
+
+    def vlc_tick(final=False):
+        if not vlc_pid or not size:
+            return
+        if not final and time.time() - vs["t"] < 30:
+            return
+        vs["t"] = time.time()
+        _vlc_save(movie, vlc_pid, vs["start"], vs["pos"], size)
 
     with _lock:
         first = _active == 0 and (time.time() - _last_activity) > 6
@@ -456,6 +514,7 @@ def serve(handler, movie, head_only=False, download=False):
             if head_only:
                 return
             pos = start
+            vs["start"] = vs["pos"] = start
             # 1) from the cached prefix
             if pos < have:
                 binp, _ = _paths(mid)
@@ -467,7 +526,9 @@ def serve(handler, movie, head_only=False, download=False):
                             break
                         handler.wfile.write(buf)
                         pos += len(buf)
+                        vs["pos"] = pos
                         _last_activity = time.time()
+                        vlc_tick()
             # 2) the rest from the provider
             if pos <= end:
                 with _open_upstream(movie["url"], pos, end) as r:
@@ -477,7 +538,9 @@ def serve(handler, movie, head_only=False, download=False):
                             break
                         handler.wfile.write(buf)
                         pos += len(buf)
+                        vs["pos"] = pos
                         _last_activity = time.time()
+                        vlc_tick()
             return
 
         # ---- no cache info: pass the provider's answer through -----------
@@ -511,6 +574,7 @@ def serve(handler, movie, head_only=False, download=False):
         except Exception:
             pass
     finally:
+        vlc_tick(final=True)
         with _lock:
             _active -= 1
             _last_activity = time.time()

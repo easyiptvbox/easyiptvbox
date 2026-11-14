@@ -656,10 +656,15 @@ def fetch_series_episodes(prov, series_id, force=False, max_age_hours=24):
             url = "%s/series/%s/%s/%s.%s" % (base, username, password, eid, ext)
             num = ep.get("episode_num")
             title = ep.get("title") or ("Episode %s" % num)
+            try:
+                dur = int(float((ep.get("info") or {}).get("duration_secs") or 0))
+            except (TypeError, ValueError):
+                dur = 0
             eps.append({
                 "title": str(title),
                 "url": url,
                 "episode_num": num,
+                "duration": dur,
             })
         eps.sort(key=lambda e: int(e["episode_num"])
                  if str(e["episode_num"]).isdigit() else 0)

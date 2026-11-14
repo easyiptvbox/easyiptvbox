@@ -5,6 +5,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 ## Week of 9 November 2026
 
 **New**
+- **Continue from where you stopped, everywhere** (issue #17): a movie or episode opened in the web app now offers "Continue from 52:10" (and "Play from the start"), also when you stopped it on the TV. The web player saves its position, so the TV continues from it. "Open in VLC" on a computer starts at the saved place, and what VLC played is saved as an approximate position (VLC for iPhone cannot be told where to start).
 - **Series fact sheet** (follow-up to issue #14): OK on a series (TV), or a tap on it in the Play tab, shows its description, year, genre, rating, creator and cast first; OK on the TV continues to the seasons.
 - **Movie fact sheet** (issue #14): OK on a movie (TV) or a tap on it (Play tab in the web app) first opens a page with the poster, year, length, genre, rating, description, director and cast, with a Play button. The details come from the provider (TMDB data); when the provider has no description, a short summary from Wikipedia is used. Details are remembered, so each movie is looked up only once.
 - **Update check** (issue #15): Settings > Software updates now has "Check for updates". It stays on the same place and says "No updates available. You are on the latest version." or lists what is new with an "Install update" button; after installing it shows the result.

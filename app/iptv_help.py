@@ -115,6 +115,9 @@ Without it VLC opens but shows an error. If VLC isn't listed, open the VLC app o
 
 <section id="movies"><h2>Movies</h2>
 <ul>
+ <li><b>Continue where you stopped</b>: the place is shared by the TV, the web player and VLC. In the web app a movie or episode
+  offers &ldquo;Continue from &hellip;&rdquo; or &ldquo;Play from the start&rdquo;. VLC on a computer starts at the saved place; what VLC played is
+  saved as an approximate position. VLC for iPhone cannot be told where to start.</li>
  <li>OK on a movie (TV), or a tap on it in the Play tab, opens its <b>fact sheet</b>: poster, year, length, genre, rating,
   description, director and cast, with a Play button. The details come from the provider (the rating is TMDB's, 0&ndash;10); if the
   provider has no description, a short summary from Wikipedia is shown. They are remembered after the first time.</li>

@@ -79,7 +79,8 @@ def _current_theme():
         import yaml
         with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             st = (yaml.safe_load(f) or {}).get("settings") or {}
-        return "light" if str(st.get("theme", "dark")) == "light" else "dark"
+        t = str(st.get("theme", "dark"))
+        return t if t in ("light", "fireplace") else "dark"
     except Exception:
         return "dark"
 
@@ -1303,7 +1304,8 @@ def build_config_yaml(data):
         "playlists": [],
         "settings": {
             "text_size": s(settings.get("text_size", "large")) or "large",
-            "theme": "light" if s(settings.get("theme", "dark")) == "light" else "dark",
+            "theme": s(settings.get("theme", "dark")) if s(settings.get("theme", "dark")) in ("light", "fireplace") else "dark",
+            "screensaver_minutes": max(0, min(240, int(_num(settings.get("screensaver_minutes", 0), 0)))),
             "audio_delay_ms": _num(settings.get("audio_delay_ms", 0), 0),
         },
     }
@@ -1496,6 +1498,11 @@ PAGE = r"""<!DOCTYPE html>
           --text:#1c2230; --dim:#5d6578; --line:#cfd5e1; --panel2:#eef1f6;
           --field:#ffffff; --tilebg:#e3e7ef; --btn2:#d5dae5; --code:#14532d;
           --errbg:#fde4e4; --errtx:#a12020; --okbg:#dcf4e4; --oktx:#17652f; --okbg2:#cfeedb; }
+  :root[data-theme="fireplace"] { --bg:#16100d; --panel:#2a1c15; --accent:#c85c1a; --accent2:#f0aa3c;
+          --text:#f0e2d0; --dim:#a08c78; --line:#4a3326; --panel2:#1f1510;
+          --field:#120c09; --tilebg:#0e0907; --btn2:#4a3326; --code:#ffd9a0;
+          --errbg:#4a1a10; --errtx:#f0a090; --okbg:#3a2a10; --oktx:#f2c36b; --okbg2:#4a3818; }
+  :root[data-theme="fireplace"] body { background:linear-gradient(0deg,#2d1608 0%,#16100d 28%) fixed; }
   :root[data-theme="light"] .tab.active { color:#fff; }
   :root[data-theme="light"] .pimg .ptxt { text-shadow:0 1px 2px #0008; }
   * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
@@ -1825,7 +1832,19 @@ PAGE = r"""<!DOCTYPE html>
       <select id="themeSel">
         <option value="dark">Dark</option>
         <option value="light">Light</option>
+        <option value="fireplace">Fireplace</option>
       </select>
+      <label>Screensaver on the TV (after no button is pressed on a menu)</label>
+      <select id="saverMin">
+        <option value="0">Off</option>
+        <option value="5">After 5 minutes</option>
+        <option value="10">After 10 minutes</option>
+        <option value="20">After 20 minutes</option>
+        <option value="30">After 30 minutes</option>
+        <option value="60">After 60 minutes</option>
+      </select>
+      <div class="pnote" style="margin-top:.3rem">The screensaver follows the theme: a calm fireplace for Fireplace, a dark
+        screen with a moving clock for Dark and Light. It never starts while something is playing. Any button ends it.</div>
       <label>Text size on the TV</label>
       <select id="textSize">
         <option value="small">Small</option>
@@ -2233,6 +2252,7 @@ async function loadForm(){
   $('provRefresh').value=Math.max(8,prov.refresh_hours||epg.refresh_hours||96);
   $('textSize').value=st.text_size||'large';
   $('themeSel').value=st.theme||'dark';
+  $('saverMin').value=String(st.screensaver_minutes||0);
   document.documentElement.dataset.theme=st.theme||'dark';
   $('audioDelay').value=(st.audio_delay_ms!==undefined&&st.audio_delay_ms!==null)?st.audio_delay_ms:0;
   PL=JSON.parse(JSON.stringify(d.playlists||[]));
@@ -2258,6 +2278,7 @@ function collectForm(){
     settings:{
       text_size:$('textSize').value,
       theme:$('themeSel').value,
+      screensaver_minutes:parseInt($('saverMin').value,10)||0,
       audio_delay_ms:parseInt($('audioDelay').value,10)||0,
     },
     playlists:PL,
@@ -2517,7 +2538,7 @@ $('themeSel').addEventListener('change',()=>{ document.documentElement.dataset.t
 
 // ---- Profiles ----
 let PROFS=[], PROF_PENDING=null;
-const SHARED_IDS=['provEnabled','provUrl','provUser','provPass','epgSources','provRefresh','audioDelay'];
+const SHARED_IDS=['provEnabled','provUrl','provUser','provPass','epgSources','provRefresh','audioDelay','saverMin'];
 function profMsg(ok,t){ const m=$('profMsg'); m.textContent=t; m.style.color=ok?'var(--oktx)':'var(--errtx)'; }
 function profAvatar(p,px){
   const d=document.createElement('div');

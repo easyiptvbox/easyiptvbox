@@ -14,6 +14,7 @@ Remote:
 """
 import os
 import sys
+import math
 import time
 import threading
 
@@ -42,6 +43,9 @@ FOLDER_PRECACHE = 150          # posters pre-downloaded per movie folder
 SIMPLE_FALLBACK = ("playlists", "channels", "series", "seasons", "episodes",
                    "loading", "resume", "info")
 MENU_SCREENS = ("playlists", "channels", "series")   # screens with the left menu
+# screens where the screensaver may start (never while playing / in setup)
+SAVER_STATES = ("playlists", "channels", "series", "seasons", "episodes",
+                "info", "resume")
 SECTIONS = ("movies", "live", "series")
 SECTION_LABELS = {"live": "Live", "movies": "Movies", "series": "Series"}
 def _ui_state_path():
@@ -96,6 +100,11 @@ THEMES = {
                  DIM=(140, 145, 160), ACCENT=(90, 200, 120),
                  MENU_BG=(20, 22, 31), TILE_BG=(10, 12, 18),
                  POPUP_BG=(28, 31, 43, 250)),
+    "fireplace": dict(BG=(22, 15, 12), PANEL=(44, 30, 24), SELECT=(200, 92, 26),
+                      SELECT_TEXT=(255, 244, 230), TEXT=(240, 226, 208),
+                      DIM=(160, 140, 120), ACCENT=(240, 170, 60),
+                      MENU_BG=(28, 19, 15), TILE_BG=(14, 9, 7),
+                      POPUP_BG=(40, 27, 21, 250)),
     "light": dict(BG=(243, 245, 249), PANEL=(224, 229, 238), SELECT=(0, 105, 180),
                   SELECT_TEXT=(255, 255, 255), TEXT=(28, 34, 48),
                   DIM=(95, 104, 120), ACCENT=(30, 140, 75),
@@ -155,6 +164,9 @@ class App:
         self._folder_index = 0     # position of the open folder in the Movies list
         self._folder_loading = None   # name of the folder being loaded
         self._info = None             # movie fact sheet: {idx, channel, data}
+        self._saver = False           # screensaver showing
+        self._last_input = time.time()
+        self._glow = None             # cached fireplace glow (w, h, surface)
         self._info_ver = 0
         self._folder_info = {}     # folder key -> {"count", "preview": [poster urls]}
         self._folder_busy = False
@@ -597,6 +609,11 @@ class App:
 
     # -- navigation actions ---------------------------------------------
     def act(self, a):
+        self._last_input = time.time()
+        if self._saver:                  # any button only ends the screensaver
+            self._saver = False
+            self._last_sig = None
+            return
         # Standby: any button wakes the box back up.
         if self.screen_state == SCREEN_STANDBY:
             self._wake_from_standby()
@@ -2689,8 +2706,14 @@ class App:
             self.surface.blit(hint, (self.W // 2 - hint.get_width() // 2,
                                      int(self.H * 0.9)))
             return
+        if self._saver and self.screen_state in SAVER_STATES:
+            self._draw_saver()
+            return
         self.surface.fill(BG)
         self._ox = 0
+        if (self.cfg.theme == "fireplace" and not self.cfg.simple_mode
+                and self.screen_state in SAVER_STATES):
+            self._draw_glow()
         if self.cfg.simple_mode and self.screen_state in SIMPLE_FALLBACK:
             self._draw_simple_msg("Starting...")      # never show the menus
             self._draw_message()
@@ -3156,6 +3179,133 @@ class App:
                                              else self.W * 0.06),
                               int(self.H * 0.05)))
 
+    # -- fireplace theme: menu glow and screensaver ------------------------
+    SAVER_FPS = 12
+
+    @staticmethod
+    def _flicker(t):
+        """Slow, irregular 0..1 flicker like a fire (sum of a few sines)."""
+        v = (0.62 + 0.18 * math.sin(t * 1.3) + 0.12 * math.sin(t * 3.1 + 1.0)
+             + 0.08 * math.sin(t * 7.3 + 2.0))
+        return max(0.0, min(1.0, v))
+
+    def _anim_sig(self):
+        """Part of the redraw signature: changes only when an animation needs
+        a new frame (screensaver, or a visible step of the menu glow)."""
+        if self.screen_state not in SAVER_STATES or self.cfg.simple_mode:
+            return 0
+        t = time.time()
+        if self._saver:
+            return int(t * self.SAVER_FPS) + 1
+        if self.cfg.theme == "fireplace":
+            return int(self._flicker(t) * 14) + 1
+        return 0
+
+    def _saver_tick(self):
+        now = time.time()
+        mins = getattr(self.cfg, "screensaver_minutes", 0)
+        if self.screen_state not in SAVER_STATES or not self._display_active:
+            self._last_input = now        # watching / setup: the clock restarts
+            if self._saver:
+                self._saver = False
+                self._last_sig = None
+            return
+        if (mins and not self._saver and not self.cfg.simple_mode
+                and now - self._last_input > mins * 60):
+            self._saver = True
+            self._last_sig = None
+        elif self._saver and (not mins or self.cfg.simple_mode):
+            self._saver = False
+            self._last_sig = None
+
+    def _draw_glow(self):
+        """A faint warm glow along the bottom edge that flickers slowly."""
+        w, h = self.W, int(self.H * 0.30)
+        if not self._glow or self._glow[0] != (w, h):
+            g = pygame.Surface((w, h), pygame.SRCALPHA)
+            for yy in range(h):
+                k = (yy / float(h)) ** 2.2          # 0 at the top, 1 at the bottom
+                g.fill((255, 120, 40, int(70 * k)), (0, yy, w, 1))
+            self._glow = ((w, h), g)
+        g = self._glow[1]
+        g.set_alpha(int(255 * (0.35 + 0.65 * self._flicker(time.time()))))
+        self.surface.blit(g, (0, self.H - h))
+
+    def _fire_layer(self, w, h, t):
+        """One frame of the fireplace at low resolution (w x h)."""
+        s = pygame.Surface((w, h))
+        s.fill((14, 7, 5))
+        cx = w // 2
+        base = int(h * 0.86)
+        # warm light on the "wall" behind the fire
+        glow = self._flicker(t)
+        if not hasattr(self, "_fire_halo") or self._fire_halo[0] != (w, h):
+            hl = pygame.Surface((w, h), pygame.SRCALPHA)
+            for r in range(int(h * 0.62), 0, -3):
+                a = int(46 * (1 - r / (h * 0.62)) ** 1.6)
+                pygame.draw.ellipse(hl, (255, 110, 30, a),
+                                    (cx - r * 1.5, base - r * 1.15, r * 3.0, r * 2.0))
+            self._fire_halo = ((w, h), hl)
+        halo = self._fire_halo[1]
+        halo.set_alpha(int(150 + 105 * glow))
+        s.blit(halo, (0, 0))
+        # logs
+        pygame.draw.rect(s, (46, 26, 15), (cx - int(w * 0.24), base - 3, int(w * 0.48), 11), border_radius=5)
+        pygame.draw.rect(s, (36, 20, 11), (cx - int(w * 0.18), base - 9, int(w * 0.36), 10), border_radius=5)
+        pygame.draw.rect(s, (60, 32, 16), (cx - int(w * 0.21), base + 4, int(w * 0.42), 9), border_radius=4)
+        # flames: four colour layers, big to small, so they glow in the middle
+        n = 11
+        layers = ((1.00, 1.00, (150, 32, 8)), (0.80, 0.76, (225, 92, 14)),
+                  (0.55, 0.52, (255, 170, 48)), (0.30, 0.30, (255, 226, 130)))
+        for sc_w, sc_h, col in layers:
+            for i in range(n):
+                f = i / float(n - 1)
+                mid = 1.0 - abs(f - 0.5) * 2.0           # tall in the middle
+                ph = i * 1.9
+                x = cx + (f - 0.5) * w * 0.34 + math.sin(t * (0.9 + 0.06 * i) + ph) * w * 0.010
+                hh = (h * (0.20 + 0.40 * mid) *
+                      (0.78 + 0.22 * math.sin(t * (1.6 + 0.1 * i) + ph * 1.3)
+                       + 0.07 * math.sin(t * 5.3 + i))) * sc_h
+                bw = w * 0.040 * sc_w * (0.75 + 0.5 * mid)
+                sway = math.sin(t * (1.2 + 0.05 * i) + ph) * w * 0.020
+                left, right = [], []
+                for k in range(9):                        # a curved tongue
+                    u = k / 8.0
+                    half = bw * (1.0 - u) ** 0.75 * (1.0 + 0.22 * math.sin(u * 7.0 + ph + t * 3.2))
+                    cxu = x + sway * u ** 1.6
+                    yy = base - hh * u
+                    left.append((cxu - half, yy))
+                    right.append((cxu + half, yy))
+                pygame.draw.polygon(s, col, left + right[::-1])
+        # a few sparks drifting up
+        for k in range(14):
+            life = (t * (0.10 + 0.018 * (k % 5)) + k * 0.137) % 1.0
+            sx = cx + math.sin(k * 2.3 + t * 0.7) * w * (0.04 + 0.12 * life)
+            sy = base - h * 0.15 - life * h * 0.6
+            c = int(255 * (1 - life))
+            s.set_at((int(sx), int(sy)), (c, int(c * 0.55), int(c * 0.15)))
+        return s
+
+    def _draw_saver(self):
+        t = time.time()
+        W, H = self.W, self.H
+        if self.cfg.theme == "fireplace":
+            lw, lh = max(240, W // 4), max(135, H // 4)
+            small = self._fire_layer(lw, lh, t)
+            # shrink then enlarge: softens the edges into a glowing flame
+            soft = pygame.transform.smoothscale(small, (lw // 2, lh // 2))
+            pygame.transform.smoothscale(soft, (W, H), self.surface)
+            col = (150, 104, 66)
+        else:
+            self.surface.fill((0, 0, 0))
+            col = (70, 72, 82)
+        # the clock moves a little every minute (no burn-in)
+        m = int(t // 60)
+        txt = self.f_title.render(time.strftime("%H:%M"), True, col)
+        x = int(W * (0.06 + 0.70 * ((m * 37) % 100) / 100.0))
+        y = int(H * (0.06 + 0.36 * ((m * 61) % 100) / 100.0))
+        self.surface.blit(txt, (x, y))
+
     def _draw_clock(self):
         if not self.cfg.show_clock:
             return
@@ -3321,7 +3471,7 @@ class App:
         """Return a cached pygame surface with a QR code for the web app URL."""
         url = web_app_url()
         cache = getattr(self, "_qr_cache", None)
-        dark = (self.cfg.theme == "dark")
+        dark = (self.cfg.theme != "light")
         if (cache and cache[0] == url and abs(cache[1] - target_px) < 4
                 and cache[3] == dark):
             return cache[2]
@@ -3397,7 +3547,7 @@ class App:
         surf = self._qr_surface(qr_px)
         if surf is not None:
             qx = (mw - qr_px) // 2
-            pygame.draw.rect(self.surface, (MENU_BG if self.cfg.theme == "dark" else (255, 255, 255)),
+            pygame.draw.rect(self.surface, (MENU_BG if self.cfg.theme != "light" else (255, 255, 255)),
                              (qx - 6, qy - 6, qr_px + 12, qr_px + 12),
                              border_radius=8)
             self.surface.blit(pygame.transform.scale(surf, (qr_px, qr_px)),
@@ -4011,6 +4161,7 @@ class App:
                 self._last_saved_pos = time.time()
 
             self.player.osd_tick()            # keep menus / banners drawn
+            self._saver_tick()
             if self.cfg.simple_mode:
                 self._simple_tick()
             if iptv_profiles.ACTIVE != self._loaded_profile and \
@@ -4205,7 +4356,8 @@ class App:
                         and (getattr(self, "_wifi_scanning", False)
                              or getattr(self, "_wifi_connecting", False))
                         else 0),
-                       self.message if time.time() < self.message_until else "")
+                       self.message if time.time() < self.message_until else "",
+                       self._anim_sig())
                 if getattr(self, "_shutting_down", False):
                     sig = getattr(self, "_last_sig", None)   # keep shutdown image
                 if sig != getattr(self, "_last_sig", None):

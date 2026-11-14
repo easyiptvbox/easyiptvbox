@@ -73,7 +73,15 @@ class Config:
         self.refresh_hours = max(MIN_REFRESH_HOURS, _h)
         s = self._data.get("settings") or {}
         self.text_scale = TEXT_SIZES.get(str(s.get("text_size", "large")), 1.3)
-        self.theme = "light" if str(s.get("theme", "dark")) == "light" else "dark"
+        _t = str(s.get("theme", "dark"))
+        self.theme = _t if _t in ("light", "fireplace") else "dark"
+        # Screensaver after this many minutes without a button on a menu
+        # (0 = off). Its look follows the theme.
+        try:
+            self.screensaver_minutes = max(0, min(240, int(float(
+                s.get("screensaver_minutes", 0) or 0))))
+        except (TypeError, ValueError):
+            self.screensaver_minutes = 0
         # "Simple mode": boot straight into a fixed list of live channels.
         sm = self._data.get("simple_mode") or {}
         self.simple_channels = []

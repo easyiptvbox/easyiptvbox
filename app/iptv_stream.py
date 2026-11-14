@@ -111,8 +111,13 @@ def _registry(pid=None):
             posters[pid] = str(url)
             return pid
 
+        folders = []
         for p in cfg.playlists:
             if p.is_movies:
+                for fo in getattr(p, "folders", []) or []:
+                    folders.append({"id": str(fo.get("id") or ""),
+                                    "name": str(fo.get("name") or ""),
+                                    "key": _folder_key(fo)})
                 for c in p.channels:
                     if c.url:
                         it = _item("movie", c.name, c.url)
@@ -139,9 +144,65 @@ def _registry(pid=None):
                              "ci": _lp.color_index(p.display_name),
                              "channels": chans})
         cat = {"live": live, "movies": movies, "series": series,
-               "palette": _lp.PALETTE}
+               "folders": folders, "palette": _lp.PALETTE}
         _regs[pid] = dict(key=key, items=items, catalog=cat, posters=posters)
+        _fill_folders(folders, posters)
         return items, cat
+
+
+def _folder_key(fo):
+    return hashlib.sha1(("%s|%s" % (fo.get("id", ""), fo.get("name", ""))
+                         ).encode("utf-8")).hexdigest()[:12]
+
+
+def _folder_movies(fo):
+    from iptv_config import movies_in_category
+    return movies_in_category(fo.get("id", ""), fo.get("name", ""))
+
+
+def _fill_folders(folders, posters):
+    """Movie count and a cover picture for every folder tile."""
+    for f in folders:
+        try:
+            ms = _folder_movies(f)
+        except Exception:
+            ms = []
+        f["count"] = len(ms)
+        f["poster"] = ""
+        for m in ms[:12]:
+            u = str(m.get("logo") or "")
+            if u.lower().startswith(("http://", "https://")):
+                p = hashlib.sha1(u.encode("utf-8")).hexdigest()[:12]
+                posters[p] = u
+                f["poster"] = p
+                break
+
+
+def folder_page(key, offset=0, limit=60, q=""):
+    """One page of the movies in a folder (registered for streaming)."""
+    _registry()
+    fo = next((f for f in catalog()["folders"] if f["key"] == key), None)
+    if fo is None:
+        return None
+    import iptv_profiles
+    posters = _regs[iptv_profiles.current()]["posters"]
+    ms = _folder_movies(fo)
+    if q:
+        words = [w for w in q.lower().split() if w]
+        ms = [m for m in ms if all(w in m["name"].lower() for w in words)]
+    out = []
+    for m in ms[offset:offset + limit]:
+        it = _item("movie", m["name"], m["url"])
+        _extra[it["id"]] = it
+        u = str(m.get("logo") or "")
+        pid = ""
+        if u.lower().startswith(("http://", "https://")):
+            pid = hashlib.sha1(u.encode("utf-8")).hexdigest()[:12]
+            posters[pid] = u
+        out.append({"id": it["id"], "name": it["name"], "ext": it["ext"],
+                    "poster": pid})
+    return {"name": fo["name"], "total": len(ms), "offset": offset,
+            "movies": out}
 
 
 def live_category_urls(key):
@@ -199,6 +260,22 @@ def resolve(item_id, kind=None):
         if it:
             break
     it = it or _extra.get(item_id)
+    if it is None and kind in (None, "movie"):
+        # after a restart: a movie that lives inside a folder
+        for p in pids:
+            for fo in _registry(p)[1].get("folders", []):
+                try:
+                    for m in _folder_movies(fo):
+                        if movie_id(m["url"]) == item_id:
+                            it = _item("movie", m["name"], m["url"])
+                            _extra[item_id] = it
+                            break
+                except Exception:
+                    pass
+                if it:
+                    break
+            if it:
+                break
     if it is None and kind in (None, "episode"):
         # after a restart: look in the cached episode lists of added series
         sids = set()

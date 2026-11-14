@@ -654,6 +654,21 @@ class ControlServer:
                                      "duration": int(rec.get("duration", 0)),
                                      "watched": ms.is_watched(it["url"])})
                     return
+                if path == "/api/play/folder":
+                    import iptv_stream, urllib.parse as up
+                    qs = up.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                    try:
+                        off = max(0, int(qs.get("offset", ["0"])[0]))
+                        lim = max(1, min(120, int(qs.get("limit", ["60"])[0])))
+                    except ValueError:
+                        off, lim = 0, 60
+                    d = iptv_stream.folder_page(qs.get("key", [""])[0], off,
+                                                lim, qs.get("q", [""])[0].strip())
+                    if d is None:
+                        self._send(404, {"error": "Not a folder"})
+                    else:
+                        self._send(200, d)
+                    return
                 if path == "/api/play/info":
                     import iptv_stream, iptv_movieinfo, urllib.parse as up
                     qs = up.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
@@ -3035,10 +3050,10 @@ function pSelect(label,options,onpick){
   wrap.appendChild(sel);
   return wrap;
 }
-function posterGrid(items,onpick,wide){
+function posterGrid(items,onpick,wide,nofilter){
   const wrap=document.createElement('div');
   let box=null;
-  if(items.length>8){
+  if(items.length>8&&!nofilter){
     box=document.createElement('input'); box.type='text'; box.placeholder='Filter by name';
     box.style.marginBottom='.2rem'; wrap.appendChild(box);
   }
@@ -3110,13 +3125,40 @@ async function loadPlay(){
   const mv=$('pmovies'); mv.innerHTML='';
   const showMovies=()=>{
     mv.innerHTML='';
-    mv.appendChild(posterGrid(d.movies.map(m=>({key:m.id,name:m.name,src:m.poster?pq('/api/poster/'+m.poster+'.jpg'):'',m:m})),
-      it=>showMovie(it.m)));
+    const items=(d.folders||[]).map(f=>({key:'f'+f.key,name:'\uD83D\uDCC1 '+f.name+' ('+f.count+')',src:f.poster?pq('/api/poster/'+f.poster+'.jpg'):'',f:f}))
+      .concat(d.movies.map(m=>({key:m.id,name:m.name,src:m.poster?pq('/api/poster/'+m.poster+'.jpg'):'',m:m})));
+    mv.appendChild(posterGrid(items,it=>it.f?showFolder(it.f):showMovie(it.m)));
   };
-  const showMovie=async m=>{
+  const showFolder=async(f,q)=>{
     mv.innerHTML='';
     const b=document.createElement('button'); b.className='ghost'; b.type='button';
-    b.textContent='\u2190 Movies'; b.style.cssText='width:100%;margin-bottom:.5rem'; b.onclick=showMovies; mv.appendChild(b);
+    b.textContent='\u2190 '+f.name+' ('+f.count+')'; b.style.cssText='width:100%;margin-bottom:.3rem'; b.onclick=showMovies; mv.appendChild(b);
+    const fi=document.createElement('input'); fi.type='text'; fi.placeholder='Search in this folder'; fi.value=q||''; fi.style.marginBottom='.4rem'; fi.autocomplete='off'; mv.appendChild(fi);
+    const holder=document.createElement('div'); mv.appendChild(holder);
+    const more=document.createElement('button'); more.className='ghost'; more.type='button'; more.style.cssText='width:100%;margin-top:.5rem;display:none'; mv.appendChild(more);
+    let off=0, tot=0, seq=0;
+    const load=async(reset)=>{
+      const my=++seq; if(reset){ off=0; holder.innerHTML=''; }
+      more.style.display='none';
+      try{
+        const r=await fetch('/api/play/folder?key='+f.key+'&offset='+off+'&limit=60&q='+encodeURIComponent(fi.value.trim())); const x=await r.json();
+        if(my!==seq) return;
+        if(!r.ok) throw new Error(x.error||'failed');
+        tot=x.total; off+=x.movies.length;
+        if(x.movies.length) holder.appendChild(posterGrid(x.movies.map(m=>({key:m.id,name:m.name,src:m.poster?pq('/api/poster/'+m.poster+'.jpg'):'',m:m})),
+          it=>showMovie(it.m,()=>showFolder(f,fi.value)),false,true));
+        else if(reset) holder.textContent='No movies found.';
+        if(off<tot){ more.textContent='Show more ('+off+' of '+tot+')'; more.style.display=''; }
+      }catch(e){ holder.textContent='Could not load the folder.'; }
+    };
+    more.onclick=()=>load(false);
+    let tm=null; fi.oninput=()=>{ clearTimeout(tm); tm=setTimeout(()=>load(true),350); };
+    load(true);
+  };
+  const showMovie=async(m,back)=>{
+    mv.innerHTML='';
+    const b=document.createElement('button'); b.className='ghost'; b.type='button';
+    b.textContent=back?'\u2190 Back':'\u2190 Movies'; b.style.cssText='width:100%;margin-bottom:.5rem'; b.onclick=back||showMovies; mv.appendChild(b);
     const box=document.createElement('div'); box.style.cssText='display:flex;gap:1rem;flex-wrap:wrap';
     const img=document.createElement('div'); img.style.cssText='flex:0 0 140px';
     if(m.poster){ const i=document.createElement('img'); i.src=pq('/api/poster/'+m.poster+'.jpg'); i.style.cssText='width:140px;border-radius:8px'; img.appendChild(i); }
@@ -3146,7 +3188,7 @@ async function loadPlay(){
       body.textContent=t;
     }catch(e){ body.textContent='No details available.'; }
   };
-  if((d.movies||[]).length) showMovies();
+  if((d.movies||[]).length||(d.folders||[]).length) showMovies();
   else mv.textContent='No movies added under Settings.';
   const se=$('pseries'); se.innerHTML=''; $('peps').innerHTML='';
   if((d.series||[]).length){

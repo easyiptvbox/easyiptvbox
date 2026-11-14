@@ -128,6 +128,7 @@ Without it VLC opens but shows an error. If VLC isn't listed, open the VLC app o
   provider lists are renewed, new matches are added to Movies and the saved search is removed.</li>
  <li>Searches use the box's copy of the provider list, renewed every
   &ldquo;Provider lists refresh every (hours)&rdquo; (see <a href="#provider">IPTV provider</a>).</li>
+ <li>The <b>Play</b> tab in the web app shows the folders as well (first in the list). Open one to browse its movies page by page and search inside it.</li>
  <li><b>Movie folders</b> (Settings &gt; Movie folders): <b>Browse all movie categories</b> opens a page with every movie category
   of your provider. Tap <b>Add</b> to put a whole category in Movies as a <b>folder</b>. On the TV the folders come first
   (with a collage of their first pictures and the number of movies); OK opens a folder and shows all its movies, Back or Left

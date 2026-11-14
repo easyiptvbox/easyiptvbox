@@ -17,6 +17,7 @@ Changes and fixes per week, latest on top (last 10 weeks).
 - **TV guide while paused** (issue #11): on a live channel, OK now pauses and shows the guide for the next hours (the programme on now in green); OK again resumes.
 
 **Fixed**
+- **Movie folders in the web app** (issue #19): the Play tab now shows your movie folders too, first in the Movies list like on the TV. Open a folder to see its movies in pages of 60 ("Show more"), search inside it, and open a movie's fact sheet to play it. "Back" returns to the folder with your search kept.
 - Volume and mute are now remembered when you switch channel or start a movie, until the box restarts. Before, every new stream started at full volume (issue #12).
 - The movie / episode menu (Resume, Audio track, Subtitles, Jump to time, Stop) is now kept on screen reliably: it is re-sent a few times right after OK and refreshed while it is open, and a failed command to the player is retried instead of lost (issue #10).
 

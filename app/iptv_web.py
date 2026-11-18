@@ -3232,7 +3232,7 @@ async function loadPlay(){
         if(x.audio) t+=(t?'\n':'')+'Audio: '+x.audio+(x.audio_match?'':' (none of your usual languages)');
         if(x.subs) t+=(t?'\n':'')+'Subtitles: '+x.subs+(x.subs_match?'':' (none of your usual languages)');
         else if(x.no_subs) t+=(t?'\n':'')+'Subtitles: none in the file';
-        if(t){ const tb=document.createElement('div'); tb.style.cssText='margin-top:.6rem;white-space:pre-line;color:var(--dim)'; tb.textContent=t; body.insertAdjacentElement('afterend',tb); }
+        if(t){ const tb=document.createElement('div'); tb.style.cssText='margin-top:.8rem;white-space:pre-line;color:var(--dim)'; tb.textContent=t; txt.appendChild(tb); }
       }
     }catch(e){}
   };

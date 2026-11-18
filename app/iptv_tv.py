@@ -170,6 +170,8 @@ class App:
         self._folder_loading = None   # name of the folder being loaded
         self._info = None             # movie fact sheet: {idx, channel, data}
         self._saver = False           # screensaver showing
+        self._idle_ask_until = 0.0    # "Are you still there?" shown until
+        self._live_idle_ref = time.time()
         self._last_input = time.time()
         self._glow = None             # cached fireplace glow (w, h, surface)
         self._info_ver = 0
@@ -615,6 +617,14 @@ class App:
     # -- navigation actions ---------------------------------------------
     def act(self, a):
         self._last_input = time.time()
+        self._live_idle_ref = self._last_input
+        if self._idle_ask_until:             # "Are you still there?" answered
+            self._idle_ask_until = 0.0
+            if self.player.is_running():
+                self.player.osd_clear()
+                if getattr(self, "_live_paused", False):
+                    self._live_resume()
+            return
         if self._saver:                  # any button only ends the screensaver
             self._saver = False
             self._last_sig = None
@@ -2599,6 +2609,8 @@ class App:
     def _launch(self, url, **kwargs):
         """Show a loading screen, release DRM, then start mpv."""
         self._live_paused = False
+        self._idle_ask_until = 0.0
+        self._live_idle_ref = time.time()
         self._crop_done = False
         self._crop_tries = 0
         self._subname_done = False
@@ -3211,6 +3223,42 @@ class App:
         if self.cfg.theme == "christmas":
             return int(t * 6) + 1             # faint snow on the menus
         return 0
+
+    IDLE_ANSWER_SECONDS = 120
+
+    def _live_idle_tick(self):
+        """Live TV left running for hours with nobody pressing a button: ask
+        "Are you still there?", and close the channel if nobody answers."""
+        hours = getattr(self.cfg, "live_idle_hours", 0)
+        live = (self.screen_state == SCREEN_PLAYING and self.player.is_running()
+                and not self.is_movie_playing() and not self.cfg.simple_mode)
+        if not live or not hours:
+            self._idle_ask_until = 0.0
+            self._live_idle_ref = time.time()
+            return
+        now = time.time()
+        if not self._idle_ask_until:
+            if now - self._live_idle_ref < hours * 3600:
+                return
+            self._idle_ask_until = now + self.IDLE_ANSWER_SECONDS
+            self._idle_shown = 0
+        left = int(self._idle_ask_until - now)
+        if left <= 0:
+            self._idle_ask_until = 0.0
+            self._live_idle_ref = now
+            self.player.stop()
+            self._acquire_display()
+            self.screen_state = (SCREEN_CHANNELS if self.current_playlist
+                                 else SCREEN_PLAYLISTS)
+            self._last_sig = None
+            self.notify("Live TV stopped: nobody was watching", 6)
+            return
+        if left != self._idle_shown:        # redraw once a second
+            self._idle_shown = left
+            self.player.osd_show(
+                r"{\an5}{\bord4}{\shad0}{\1c&HFFFFFF&}{\3c&H000000&}"
+                r"{\fs64}{\b1}Are you still there?{\b0}\N{\fs40}Press any button to keep watching\N"
+                r"{\fs34}{\1c&HA0A0A0&}The channel closes in %d:%02d" % (left // 60, left % 60))
 
     def _season_tick(self):
         """Seasonal themes (Christmas from 1 December): checked at start and
@@ -4277,6 +4325,7 @@ class App:
 
             self.player.osd_tick()            # keep menus / banners drawn
             self._saver_tick()
+            self._live_idle_tick()
             self._season_tick()
             if getattr(self, "_season_changed", False):
                 self._season_changed = False

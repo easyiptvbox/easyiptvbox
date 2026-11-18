@@ -52,6 +52,8 @@ HELP_PAGE = r"""<!DOCTYPE html>
 </nav>
 
 <section id="remote"><h2>The remote</h2>
+<p>The recommended remote is the <b>G10S</b> USB remote: plug its dongle into the box and it works like a keyboard. The <b>Argon IR remote</b> and
+other infrared remotes are supported too (see <a href="#remotes">Remotes</a>).</p>
 <table>
 <tr><th>Button</th><th>What it does</th></tr>
 <tr><td>Arrows</td><td>Move around. Hold an arrow to scroll quickly (about 3 steps a second).</td></tr>
@@ -241,6 +243,10 @@ long is shrunk to fit, and shortened with &ldquo;&hellip;&rdquo; as a last resor
  <li><b>Positive</b> (e.g. 100): sound later &ndash; use when the sound comes before the picture.</li>
 </ul>
 <p class="tip">Takes effect the next time a channel is opened.</p>
+<p><b>Are you still there?</b> After 2 hours of live TV without a button press (you can choose 1 to 6 hours, or never) the TV asks
+&ldquo;Are you still there?&rdquo;. Press any button to keep watching; if nobody does within two minutes the channel is closed and the TV
+returns to the channel list. Any button press, or changing channel, starts the count again. It does not apply to movies or series, and it
+is not used in simple mode. It is a setting of the whole box.</p>
 </section>
 
 <section id="remotes"><h2>Remotes</h2>
@@ -252,6 +258,8 @@ long is shrunk to fit, and shortened with &ldquo;&hellip;&rdquo; as a last resor
  <li><b>Add a remote</b> (here, or Menu &rsaquo; Add a remote on the TV) opens a wizard on the TV: press
   each button it asks for. If the remote lacks a button, press the already-learned OK to skip it.</li>
  <li>All listed remotes work at the same time. Rename or delete them here.</li>
+ <li>A <b>G10S</b> (or other USB) remote needs no learning: its dongle works as a keyboard. Its pointer is not used, and its power button
+  can switch the box off but not on.</li>
  <li>POWER isn't learned: the Argon case handles it.</li>
 </ul>
 </section>

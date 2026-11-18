@@ -1328,6 +1328,7 @@ def build_config_yaml(data):
             "theme": _clean_theme(s(settings.get("theme", "dark"))),
             "screensaver_minutes": max(0, min(240, int(_num(settings.get("screensaver_minutes", 0), 0)))),
             "audio_delay_ms": _num(settings.get("audio_delay_ms", 0), 0),
+            "live_idle_hours": max(0, min(12, _num(settings.get("live_idle_hours"), 2))),
         },
     }
     sm = _clean_simple_mode(data.get("simple_mode"))
@@ -1890,6 +1891,17 @@ PAGE = r"""<!DOCTYPE html>
 
     <div class="card">
       <h2><a class="hl" href="/help#playback" target="_blank" rel="noopener">Playback <span class="hi">?</span></a></h2>
+      <label>Ask &ldquo;Are you still there?&rdquo; during live TV</label>
+      <select id="liveIdle">
+        <option value="0">Never</option>
+        <option value="1">After 1 hour without a button press</option>
+        <option value="2">After 2 hours without a button press</option>
+        <option value="3">After 3 hours without a button press</option>
+        <option value="4">After 4 hours without a button press</option>
+        <option value="6">After 6 hours without a button press</option>
+      </select>
+      <div class="pnote" style="margin:.3rem 0 .9rem">If nobody presses a button within two minutes of the question, the channel is closed.
+        It is not used in simple mode.</div>
       <label>Audio sync for live TV (milliseconds)</label>
       <input type="number" id="audioDelay" step="10" min="-2000" max="2000"
              placeholder="0">
@@ -2290,6 +2302,7 @@ async function loadForm(){
     $('themeSel').value=(st.theme==='christmas'&&!av)?'dark':(st.theme||'dark'); }
   $('saverMin').value=String(st.screensaver_minutes||0);
   document.documentElement.dataset.theme=$('themeSel').value;
+  $('liveIdle').value=String(st.live_idle_hours!==undefined&&st.live_idle_hours!==null?st.live_idle_hours:2);
   $('audioDelay').value=(st.audio_delay_ms!==undefined&&st.audio_delay_ms!==null)?st.audio_delay_ms:0;
   PL=JSON.parse(JSON.stringify(d.playlists||[]));
   PL.forEach(p=>{p.channels=p.channels||[];});
@@ -2316,6 +2329,7 @@ function collectForm(){
       theme:$('themeSel').value,
       screensaver_minutes:parseInt($('saverMin').value,10)||0,
       audio_delay_ms:parseInt($('audioDelay').value,10)||0,
+      live_idle_hours:parseFloat($('liveIdle').value),
     },
     playlists:PL,
   };
@@ -2574,7 +2588,7 @@ $('themeSel').addEventListener('change',()=>{ document.documentElement.dataset.t
 
 // ---- Profiles ----
 let PROFS=[], PROF_PENDING=null;
-const SHARED_IDS=['provEnabled','provUrl','provUser','provPass','epgSources','provRefresh','audioDelay','saverMin'];
+const SHARED_IDS=['provEnabled','provUrl','provUser','provPass','epgSources','provRefresh','audioDelay','saverMin','liveIdle'];
 function profMsg(ok,t){ const m=$('profMsg'); m.textContent=t; m.style.color=ok?'var(--oktx)':'var(--errtx)'; }
 function profAvatar(p,px){
   const d=document.createElement('div');

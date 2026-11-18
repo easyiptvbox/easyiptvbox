@@ -1,6 +1,7 @@
-# IPTV Player for Raspberry Pi (Argon IR Remote)
+# IPTV Player for Raspberry Pi (G10S remote)
 
 A dead-simple, full-screen IPTV player. It can be controlled by the
+**G10S USB remote** (recommended), by an **infrared remote** such as the
 **Argon IR Remote** (needs an IR receiver — see note below) **and** by a
 **web-based virtual remote** you open from any phone, tablet or laptop on
 the same network.
@@ -29,6 +30,11 @@ You get three tabs:
   reloads automatically. Invalid YAML is rejected with an error and the
   previous config is backed up to `config.yaml.bak`.
 
+> Note on the G10S: it plugs into a USB port with its small dongle and the box
+> reads it like a keyboard (arrows, OK, Back, Home, Menu, volume). It has no
+> IR receiver requirement. Its air-mouse pointer is not used, and its power
+> button can switch the box off but not on.
+>
 > Note on the IR remote: the Raspberry Pi has **no built-in IR receiver**.
 > The Argon remote only works if an IR receiver is connected (the Argon
 > ONE case has one on GPIO23, already configured here, or add a cheap
@@ -43,7 +49,8 @@ You get three tabs:
 | <img src="docs/img/case.jpg" width="160" alt="Argon ONE case"> | **Argon ONE case**, with built-in fan, power button and IR receiver. The Argon case is optional, but a case **with a fan is not**: the Pi 5 gets hot when playing HD video. |
 | <img src="docs/img/power.jpg" width="160" alt="USB-C power supply"> | **Official USB-C power supply** for the Raspberry Pi 5. |
 | <img src="docs/img/hdmi.jpg" width="160" alt="Micro HDMI cable"> | **Micro HDMI to HDMI cable** to connect the TV. |
-| <img src="docs/img/remote.jpg" width="160" alt="Argon IR remote"> | **Argon IR remote** (optional; the web remote works without it). |
+|  | **G10S USB remote** (recommended; optional, the web remote works without it). Plug its dongle into a USB port. |
+| <img src="docs/img/remote.jpg" width="160" alt="Argon IR remote"> | **Argon IR remote** (supported, optional; needs the Argon ONE case or an IR receiver). |
 
 All of these can be bought at [raspberrypi.dk](https://raspberrypi.dk/en/).
 

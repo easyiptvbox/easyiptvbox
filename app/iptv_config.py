@@ -97,6 +97,13 @@ class Config:
                     "movie" if ch.get("kind") == "movie" else "live"))
                 self.simple_channels[-1].gid = str(ch.get("gid") or "")
         self.simple_mode = bool(sm.get("enabled")) and bool(self.simple_channels)
+        # "Are you still there?" after this many hours of live TV without a
+        # button press (0 = off). On by default; never in simple mode.
+        try:
+            self.live_idle_hours = max(0.0, min(12.0, float(
+                s.get("live_idle_hours", 2) if s.get("live_idle_hours") is not None else 2)))
+        except (TypeError, ValueError):
+            self.live_idle_hours = 2.0
         self.autoplay_first = bool(s.get("autoplay_first_channel", False))
         self.show_clock = bool(s.get("show_clock", True))
         # Live-TV audio sync offset, in seconds (config stores milliseconds).

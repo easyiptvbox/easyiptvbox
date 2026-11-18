@@ -117,6 +117,9 @@ Without it VLC opens but shows an error. If VLC isn't listed, open the VLC app o
 
 <section id="movies"><h2>Movies</h2>
 <ul>
+ <li>At the bottom of the fact sheet you also see the <b>picture quality</b> (4K, 1080p, 720p or SD) and the <b>audio</b> and <b>subtitle</b> languages
+  in the file. Only languages you have chosen before are listed; if none match, what the file has is shown instead. The card opens first and
+  these lines appear a moment later, once the box has read the file. This only happens while nothing is playing, and it is remembered.</li>
  <li><b>Continue where you stopped</b>: the place is shared by the TV, the web player and VLC. In the web app a movie or episode
   offers &ldquo;Continue from &hellip;&rdquo; or &ldquo;Play from the start&rdquo;. VLC on a computer starts at the saved place; what VLC played is
   saved as an approximate position. VLC for iPhone cannot be told where to start.</li>

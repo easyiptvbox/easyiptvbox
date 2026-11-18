@@ -37,6 +37,7 @@ import iptv_config
 import iptv_net
 import iptv_stream
 import iptv_movieinfo
+import iptv_movietech
 
 # screens that must never be seen in simple mode: it falls back to the channel
 FOLDER_PRECACHE = 150          # posters pre-downloaded per movie folder
@@ -1051,7 +1052,8 @@ class App:
         """OK on a movie: show its fact sheet first (play from there)."""
         ch = self.current_playlist.channels[idx]
         self._info = {"idx": idx, "channel": ch,
-                      "data": iptv_movieinfo.cached(ch.url)}
+                      "data": iptv_movieinfo.cached(ch.url),
+                      "tech": iptv_movietech.cached(ch.url)}
         if ch.logo:
             iptv_posters.request([ch.logo])
         self.screen_state = SCREEN_INFO
@@ -1065,6 +1067,20 @@ class App:
                 info["data"] = d
                 self._info_ver += 1
             threading.Thread(target=work, daemon=True).start()
+        if self._info["tech"] is None:
+            info = self._info
+
+            def tech():
+                # reading the file header uses the provider's one connection:
+                # only when nothing is playing or being scanned
+                if (self.player.is_running() or iptv_stream.busy()
+                        or self.thumbs.is_scanning()):
+                    return
+                d = iptv_movietech.probe(ch.url)
+                if d:
+                    info["tech"] = d
+                    self._info_ver += 1
+            threading.Thread(target=tech, daemon=True).start()
 
     def _open_series_info(self, idx):
         """OK on a series: show its fact sheet first (seasons from there)."""
@@ -1155,6 +1171,22 @@ class App:
             meta = [p for p in meta if p]
             if meta:
                 block("  -  ".join(meta), self.f_small, TEXT, bottom)
+            tech = None if sr else info.get("tech")
+            if tech:
+                sm = iptv_movietech.summary(tech, self.movies.audio_langs,
+                                            self.movies.sub_langs)
+                if sm.get("quality"):
+                    block(sm["quality"], self.f_small, TEXT, bottom)
+                if sm.get("audio"):
+                    block("Audio: " + sm["audio"] + ("" if sm["audio_match"]
+                          else "  (none of your usual languages)"),
+                          self.f_hint, TEXT if sm["audio_match"] else DIM, bottom)
+                if sm.get("subs"):
+                    block("Subtitles: " + sm["subs"] + ("" if sm["subs_match"]
+                          else "  (none of your usual languages)"),
+                          self.f_hint, TEXT if sm["subs_match"] else DIM, bottom)
+                elif sm.get("no_subs"):
+                    block("Subtitles: none in the file", self.f_hint, DIM, bottom)
             if d.get("rating"):
                 block("Rating %.1f / 10%s" % (d["rating"], " (%s)" % d["rating_src"]
                                               if d.get("rating_src") else ""),

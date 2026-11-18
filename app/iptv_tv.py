@@ -37,6 +37,7 @@ import iptv_config
 import iptv_net
 import iptv_stream
 import iptv_movieinfo
+import iptv_movietech
 
 # screens that must never be seen in simple mode: it falls back to the channel
 FOLDER_PRECACHE = 150          # posters pre-downloaded per movie folder
@@ -1051,7 +1052,8 @@ class App:
         """OK on a movie: show its fact sheet first (play from there)."""
         ch = self.current_playlist.channels[idx]
         self._info = {"idx": idx, "channel": ch,
-                      "data": iptv_movieinfo.cached(ch.url)}
+                      "data": iptv_movieinfo.cached(ch.url),
+                      "tech": iptv_movietech.cached(ch.url)}
         if ch.logo:
             iptv_posters.request([ch.logo])
         self.screen_state = SCREEN_INFO
@@ -1065,6 +1067,25 @@ class App:
                 info["data"] = d
                 self._info_ver += 1
             threading.Thread(target=work, daemon=True).start()
+        if self._info["tech"] is None:
+            info = self._info
+
+            def tech():
+                # reading the file header uses the provider's one connection:
+                # only when nothing is playing or being scanned
+                try:
+                    if (self.player.is_running() or iptv_stream.busy()
+                            or self.thumbs.is_scanning()):
+                        return
+                    info["tech_pending"] = True
+                    self._info_ver += 1
+                    d = iptv_movietech.probe(ch.url)
+                    if d:
+                        info["tech"] = d
+                finally:
+                    info["tech_pending"] = False
+                    self._info_ver += 1
+            threading.Thread(target=tech, daemon=True).start()
 
     def _open_series_info(self, idx):
         """OK on a series: show its fact sheet first (seasons from there)."""
@@ -1170,12 +1191,37 @@ class App:
             need = 0
             for e in extra:
                 need += min(3, len(self._wrap(self.f_hint, e, maxw))) * lh_h
-            plot_limit = bottom - need - (12 if extra else 0)
+            # file details (quality, audio, subtitles) sit at the very bottom;
+            # the space is kept while they are being read, so nothing jumps
+            tech = None if sr else info.get("tech")
+            tech_lines = []
+            if tech:
+                sm = iptv_movietech.summary(tech, self.movies.audio_langs,
+                                            self.movies.sub_langs)
+                if sm.get("quality"):
+                    tech_lines.append((sm["quality"], TEXT))
+                if sm.get("audio"):
+                    tech_lines.append(("Audio: " + sm["audio"] + (
+                        "" if sm["audio_match"] else "  (none of your usual languages)"),
+                        TEXT if sm["audio_match"] else DIM))
+                if sm.get("subs"):
+                    tech_lines.append(("Subtitles: " + sm["subs"] + (
+                        "" if sm["subs_match"] else "  (none of your usual languages)"),
+                        TEXT if sm["subs_match"] else DIM))
+                elif sm.get("no_subs"):
+                    tech_lines.append(("Subtitles: none in the file", DIM))
+            tech_h = 0
+            if tech_lines or (not sr and info.get("tech_pending")):
+                tech_h = 3 * lh_h + 10
+            plot_limit = bottom - need - tech_h - (12 if extra else 0)
             block(d.get("plot") or "No description available.", self.f_small,
                   TEXT if d.get("plot") else DIM, plot_limit)
             y += 12
             for e in extra:
-                block(e, self.f_hint, DIM, min(bottom, y + 3 * lh_h))
+                block(e, self.f_hint, DIM, min(bottom - tech_h, y + 3 * lh_h))
+            y = bottom - tech_h + 10
+            for txt, col in tech_lines[:3]:
+                block(txt, self.f_hint, col, bottom + lh_h)
         # the play button
         bw, bh = int(W * 0.30), int(H * 0.085)
         by = int(H * 0.84) - bh // 2

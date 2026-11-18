@@ -669,6 +669,28 @@ class ControlServer:
                     else:
                         self._send(200, d)
                     return
+                if path == "/api/play/tech":
+                    import iptv_stream, iptv_movies, iptv_movietech, urllib.parse as up
+                    qs = up.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
+                    it = iptv_stream.resolve(qs.get("id", [""])[0], "movie")
+                    if not it:
+                        self._send(404, {"error": "Not found"})
+                        return
+                    d = iptv_movietech.cached(it["url"])
+                    if d is None:
+                        if (outer.status.get("screen") == "playing"
+                                or iptv_stream.busy()):
+                            self._send(200, {"busy": True})
+                            return
+                        d = iptv_movietech.probe(it["url"])
+                    if not d:
+                        self._send(200, {"unavailable": True})
+                        return
+                    ms = iptv_movies.MovieState()
+                    out = iptv_movietech.summary(d, ms.audio_langs, ms.sub_langs)
+                    out["ok"] = True
+                    self._send(200, out)
+                    return
                 if path == "/api/play/info":
                     import iptv_stream, iptv_movieinfo, urllib.parse as up
                     qs = up.parse_qs(self.path.split("?", 1)[1] if "?" in self.path else "")
@@ -3201,6 +3223,18 @@ async function loadPlay(){
       if(x.cast) t+='\nCast: '+x.cast;
       body.textContent=t;
     }catch(e){ body.textContent='No details available.'; }
+    // picture quality, audio and subtitles (read from the file; skipped while the box is busy)
+    try{
+      const r=await fetch('/api/play/tech?id='+encodeURIComponent(m.id)); const x=await r.json();
+      if(x&&x.ok){
+        let t='';
+        if(x.quality) t+=x.quality;
+        if(x.audio) t+=(t?'\n':'')+'Audio: '+x.audio+(x.audio_match?'':' (none of your usual languages)');
+        if(x.subs) t+=(t?'\n':'')+'Subtitles: '+x.subs+(x.subs_match?'':' (none of your usual languages)');
+        else if(x.no_subs) t+=(t?'\n':'')+'Subtitles: none in the file';
+        if(t){ const tb=document.createElement('div'); tb.style.cssText='margin-top:.8rem;white-space:pre-line;color:var(--dim)'; tb.textContent=t; txt.appendChild(tb); }
+      }
+    }catch(e){}
   };
   if((d.movies||[]).length||(d.folders||[]).length) showMovies();
   else mv.textContent='No movies added under Settings.';
